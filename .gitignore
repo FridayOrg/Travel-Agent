@@ -1,0 +1,11 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Frontend project, tracked separately
+Evara/
+
+# Claude Code local session/config files
+.claude/

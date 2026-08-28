@@ -1,0 +1,8 @@
+python-dotenv
+google-genai
+tavily-python
+requests
+streamlit
+fastapi
+uvicorn[standard]
+pydantic
