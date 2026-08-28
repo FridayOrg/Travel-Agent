@@ -1,40 +1,58 @@
-Paste the text below into your Lovable project's AI chat.
+Paste the text below into your Lovable project's AI chat exactly as-is.
 
 --------------------------------------------------------------------------------
 
-BUG: "Sorry — I could not reach the travel service. Request failed (404)"
+Fix this bug now: "Sorry — I could not reach the travel service. Request failed (404)"
+appears when clicking a button, typing, or using voice input, especially soon after
+the app loads.
 
-This happens when the app calls POST /api/session/{session_id}/static-answer
-(or any other /api/session/{session_id}/... endpoint) with a session_id that is
-missing, empty, or the literal string "undefined" — i.e. the request goes out
-before a session has actually been created, or the app lost track of the
-session_id it was given earlier. I confirmed the backend itself is working
-correctly (tested live with the exact same input and got a valid 200 response
-with resolved fields) — this is purely a frontend state/timing bug, not a
-backend issue, and it affects typed input, button clicks, and voice input
-equally (whichever happens to fire first, before the session exists).
+ROOT CAUSE (confirmed): the app is calling
+POST https://travel-agent-mw5e.onrender.com/api/session/{session_id}/static-answer
+(or another /api/session/{session_id}/... endpoint) with a session_id that is
+missing, empty, or the literal string "undefined" — meaning the request fires
+before a session has been created, or a component lost track of the session_id.
+I tested the backend directly with the same input and it returns 200 with correct
+data, so the backend is not the problem — this is purely a frontend state bug.
 
-REQUIRED FIX
+DO THIS, EXACTLY:
 
-1. On app load (before showing any input, buttons, or chat), call
-   POST https://travel-agent-mw5e.onrender.com/api/session ONCE, wait for the
-   response, and store the returned "session_id" in app state (not just a
-   local variable inside one component — it needs to be available to every
-   screen/stage that makes a backend call).
-2. Disable/block ALL input (buttons, text box, mic) until that session_id is
-   confirmed present in state. Show a brief loading state on first load if
-   needed, rather than letting the user submit anything before the session
-   exists.
-3. Every subsequent call to any /api/session/{session_id}/... endpoint
-   (static-answer, message, hotel-details, stt, tts, images, hotel-cards,
-   state) must read session_id from that shared app state — audit every
-   call site and make sure none of them have a stale, hardcoded, or
-   uninitialized session_id.
-4. If a call ever does come back 404 with "Unknown session_id" (e.g. the
-   session expired or the backend restarted), automatically create a new
-   session (repeat step 1) and either retry the request or prompt the user
-   to restart — don't just show a raw error.
-5. Verify by reproducing the original bug: reload the app, and as fast as
-   possible try clicking a button, typing, or using voice input before the
-   destinations/buttons have finished rendering — confirm it no longer
-   404s, because input is now blocked until session_id is ready.
+1. Create ONE global session store (React Context, Zustand, or whatever state
+   solution this app already uses — pick the one already in use, don't add a new
+   one). It holds: sessionId (string | null), sessionReady (boolean).
+
+2. At the top of the app (App root / a top-level provider that wraps EVERYTHING,
+   not inside any individual screen or button component), on first mount:
+   - call POST https://travel-agent-mw5e.onrender.com/api/session
+   - on success, store the returned "session_id" into the global store and set
+     sessionReady = true
+   - on failure, retry automatically (e.g. retry up to 3 times with a short delay)
+     and only show an error state if all retries fail
+
+3. While sessionReady is false, the entire chat UI (all buttons, the text input,
+   the mic button) must be disabled or show a loading/skeleton state. The user
+   must be physically unable to click, type-submit, or record voice before
+   sessionReady is true. This is the actual fix — it closes the race condition
+   that causes the 404.
+
+4. Find EVERY place in the codebase that currently calls any
+   /api/session/{session_id}/... endpoint (static-answer, message, hotel-details,
+   stt, tts, images, hotel-cards, state — all of them). Replace any local,
+   component-scoped, prop-drilled, or duplicated session_id variable in each of
+   these call sites with a read from the ONE global store created in step 1. Do
+   not leave any call site with its own separate copy of session_id.
+
+5. Add a safety net: if any of these calls ever comes back 404 with
+   {"detail": "Unknown session_id"}, treat that as "the session expired" —
+   automatically call POST /api/session again, store the new session_id, and
+   retry the original request once. Never show the raw "Request failed (404)"
+   text to the user.
+
+6. After implementing, verify it yourself: simulate reloading the app and
+   immediately interacting (click a button / type / start voice recording)
+   before the destination cards have finished loading. Confirm no 404 occurs
+   and the interaction either queues until session is ready or the input was
+   correctly disabled until then.
+
+Do not stop at a partial fix (e.g. only fixing the INTAKE screen) — this must
+apply globally, to every screen and every input method, since session_id is
+shared app-wide state, not per-screen state.
