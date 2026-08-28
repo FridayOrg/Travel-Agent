@@ -12,7 +12,7 @@ import re
 
 from google.genai import types
 
-from llm import get_client, MODEL, today_context
+from llm import get_client, MODEL, today_context, generate_with_retry, send_with_retry
 from static_stages import INTAKE_QUESTIONS, HOTEL_TRAVELLERS_QUESTION, HOTEL_BUDGET_QUESTION
 from tools.search import web_search
 
@@ -21,7 +21,7 @@ _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 def _ask_matcher(instructions: str) -> dict:
     client = get_client()
-    resp = client.models.generate_content(model=MODEL, contents=instructions)
+    resp = generate_with_retry(client, model=MODEL, contents=instructions)
     raw = (resp.text or "").strip()
     start, end = raw.find("{"), raw.rfind("}")
     if start == -1 or end == -1 or end < start:
@@ -59,7 +59,7 @@ Classify what they mean, choosing exactly one:
 
 Respond with ONLY one word: answer, question, or change_request"""
     client = get_client()
-    resp = client.models.generate_content(model=MODEL, contents=prompt)
+    resp = generate_with_retry(client, model=MODEL, contents=prompt)
     label = (resp.text or "").strip().lower()
     if "change" in label:
         return "change_request"
@@ -205,5 +205,5 @@ Keep the whole reply SHORT — 2-4 sentences."""
         model=MODEL,
         config=types.GenerateContentConfig(tools=[web_search]),
     )
-    resp = chat.send_message(prompt)
+    resp = send_with_retry(chat, prompt)
     return (resp.text or "").strip() or "I'm not sure I follow — could you let me know your answer to the question above?"

@@ -4,7 +4,7 @@ import requests
 from google.genai import types
 
 from config import ELEVENLABS_API_KEY
-from llm import get_stt_client, MODEL
+from llm import get_stt_client, MODEL, generate_with_retry
 
 TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
 
@@ -32,7 +32,8 @@ def speech_to_text(audio_bytes: bytes, filename: str = "audio.wav") -> str:
     mime_type = mimetypes.guess_type(filename)[0] or "audio/wav"
 
     client = get_stt_client()
-    response = client.models.generate_content(
+    response = generate_with_retry(
+        client,
         model=MODEL,
         contents=[
             "Transcribe this audio exactly, word for word. Output ONLY the transcription "

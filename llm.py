@@ -92,11 +92,13 @@ def get_stt_client():
     return _stt_client
 
 
-def send_with_retry(chat, message: str, max_retries: int = 8):
-    """Send a chat message, automatically waiting out Gemini free-tier 429 rate limits."""
+def _call_with_retry(fn, max_retries: int = 8):
+    """Runs fn() (a zero-arg callable making one Gemini API call), automatically waiting out
+    free-tier 429 rate limits and retrying. Shared by every call site that talks to Gemini
+    directly, so none of them can turn a transient rate limit into an unhandled 500."""
     for attempt in range(max_retries):
         try:
-            return chat.send_message(message)
+            return fn()
         except errors.ClientError as e:
             if getattr(e, "code", None) != 429 or attempt == max_retries - 1:
                 raise
@@ -106,6 +108,18 @@ def send_with_retry(chat, message: str, max_retries: int = 8):
                 delay = float(match.group(1))
             time.sleep(delay + 1)
     raise RuntimeError("unreachable")
+
+
+def send_with_retry(chat, message: str, max_retries: int = 8):
+    """Send a chat message, automatically waiting out Gemini free-tier 429 rate limits."""
+    return _call_with_retry(lambda: chat.send_message(message), max_retries)
+
+
+def generate_with_retry(client, max_retries: int = 8, **kwargs):
+    """client.models.generate_content(**kwargs), automatically waiting out Gemini free-tier
+    429 rate limits — the generate_content equivalent of send_with_retry, for call sites that
+    use a one-off client.models.generate_content call instead of a chat session."""
+    return _call_with_retry(lambda: client.models.generate_content(**kwargs), max_retries)
 
 
 if __name__ == "__main__":
