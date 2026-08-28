@@ -56,21 +56,21 @@ def make_agent(context):
         """
         result = _search_hotels(city, country_code, context.checkin, context.checkout, context.adults)
 
-        known = {}
-        known_raw = {}
+        # Merge into (never overwrite) the accumulated map — this can be called more than once per
+        # turn (e.g. Gemini retrying a tool-calling turn after a transient error), and each call can
+        # return a different subset/order of hotels. Overwriting would drop hotels the model already
+        # named in earlier tool results but didn't re-fetch, breaking the later name->id lookup used
+        # to attach real images/cards to whatever the reply actually recommends.
         for hotel in (result.get("raw") or {}).get("data") or []:
             hotel_id = hotel.get("id")
             if hotel_id:
-                known[hotel_id] = hotel.get("name")
-                known_raw[hotel_id] = {
+                context.known_hotels[hotel_id] = hotel.get("name")
+                context.known_hotels_raw[hotel_id] = {
                     "name": hotel.get("name"),
                     "main_photo": hotel.get("main_photo"),
                     "thumbnail": hotel.get("thumbnail"),
                     "city": hotel.get("city"),
                 }
-        if known:
-            context.known_hotels = known
-            context.known_hotels_raw = known_raw
 
         return result
 
