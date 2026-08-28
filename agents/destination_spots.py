@@ -33,6 +33,14 @@ call change_destination with the new place first, then continue exactly as if th
 from the start — suggest real spots there, ask trip duration again, build a fresh itinerary, and confirm it,
 all grounded in web_search for the NEW destination.
 
+If the traveller asks about specific hotels or hotel recommendations at this stage (e.g. "any luxury hotel
+suggestions?", "where should I stay?"), do NOT name specific properties, prices, or amenities yourself — you
+have no live hotel data here and must never invent it. Instead, briefly acknowledge what they're after (e.g.
+luxury, beachfront, budget) and explain that once the itinerary is confirmed you'll pull real hotel options
+with live pricing and photos for them to choose from. Keep steering the conversation toward finishing the
+itinerary (trip duration, then itinerary confirmation) so they reach that real hotel search quickly — never
+substitute your own guesses for it.
+
 {clarifying_question_instructions}
 
 {response_formatting_instructions}
