@@ -1,15 +1,18 @@
-Paste the text below into your new Lovable project's AI chat.
-Before pasting, replace `<BACKEND_URL>` with your deployed backend's public URL
-(e.g. https://your-app.onrender.com) once it's hosted.
+Paste the text below into your new Lovable project's AI chat. The backend URL is already
+filled in and verified live: https://travel-agent-mw5e.onrender.com
+
+Note: this is Render's free tier, which spins the service down after ~15 minutes of no
+traffic. The very first request after it's been idle can take 30-60s to "wake up" (cold
+start) before responding normally — that's expected, not a bug.
 
 --------------------------------------------------------------------------------
 
 Add an AI travel-planning chat feature to this app. There is already a working backend —
-a FastAPI multi-agent travel advisor — hosted at `<BACKEND_URL>`. Do not build any AI logic
+a FastAPI multi-agent travel advisor — hosted at `https://travel-agent-mw5e.onrender.com`. Do not build any AI logic
 yourself; only build the frontend chat UI and wire it to these existing REST endpoints.
 
 GENERAL RULES
-- All requests/responses are JSON. Base URL: `<BACKEND_URL>`
+- All requests/responses are JSON. Base URL: `https://travel-agent-mw5e.onrender.com`
 - A conversation is a "session" — call POST /api/session once at the start to get a
   session_id, then include that session_id in every subsequent call's URL.
 - Every endpoint that advances the conversation returns a common state shape:

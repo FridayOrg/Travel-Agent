@@ -4,7 +4,7 @@ from datetime import date
 
 from google import genai
 from google.genai import errors
-from config import GEMINI_API_KEY
+from config import GEMINI_API_KEY, BOOKING_GEMINI_API_KEY
 
 MODEL = "gemini-flash-lite-latest"
 
@@ -37,6 +37,7 @@ Rules:
   your own destination/hotel recommendations or any other content."""
 
 _client = None
+_booking_client = None
 
 
 def get_client():
@@ -46,6 +47,18 @@ def get_client():
             raise RuntimeError("GEMINI_API_KEY is missing from .env")
         _client = genai.Client(api_key=GEMINI_API_KEY)
     return _client
+
+
+def get_booking_client():
+    """Separate Gemini client/API key for the booking agent, so its quota doesn't contend
+    with the other agents sharing GEMINI_API_KEY — booking is the last, most time-sensitive
+    step in the flow, right when a traveller is trying to finish checking out."""
+    global _booking_client
+    if _booking_client is None:
+        if not BOOKING_GEMINI_API_KEY:
+            raise RuntimeError("BOOKING_GEMINI_API_KEY (or GEMINI_API_KEY) is missing from .env")
+        _booking_client = genai.Client(api_key=BOOKING_GEMINI_API_KEY)
+    return _booking_client
 
 
 def send_with_retry(chat, message: str, max_retries: int = 8):

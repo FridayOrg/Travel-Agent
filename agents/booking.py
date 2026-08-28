@@ -1,5 +1,5 @@
 from google.genai import types
-from llm import get_client, MODEL, today_context, clarifying_question_instructions
+from llm import get_booking_client, MODEL, today_context, clarifying_question_instructions
 from tools.booking import (
     get_hotel_rates as _get_hotel_rates,
     prebook_rate as _prebook_rate,
@@ -184,7 +184,7 @@ def make_agent(context):
         if hid != context.selected_hotel_id
     }
 
-    client = get_client()
+    client = get_booking_client()
     chat = client.chats.create(
         model=MODEL,
         config=types.GenerateContentConfig(
