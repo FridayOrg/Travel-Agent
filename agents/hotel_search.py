@@ -38,6 +38,13 @@ field — when you later call select_hotel, you MUST copy that id string exactly
 the search_hotels result. Never paraphrase, reformat, or guess an id — if you're not looking directly at the
 id from a tool result, don't call select_hotel yet.
 
+Immediately after writing your curated reply presenting the 2-3 hotels (same turn, right after your text),
+call recommend_hotels with the exact "id" values of ONLY those 2-3 hotels you just presented, in the same
+order — copied verbatim from search_hotels results, never guessed or reformatted. This is required every time
+you present hotel picks (including if you revise/re-present a different set later), so the traveller's app can
+show the right photos and details for exactly what you're recommending — not any other place name your reply
+happens to mention in passing.
+
 Once the traveller clearly picks one of the hotels you presented, call select_hotel with its exact id and
 name to move on to booking. Do not call it before they've actually chosen one.
 
@@ -73,6 +80,24 @@ def make_agent(context):
                 }
 
         return result
+
+    def recommend_hotels(hotel_ids: list[str]) -> str:
+        """Call right after presenting your curated 2-3 hotel picks in your reply text, with the
+        exact ids (from search_hotels) of exactly those hotels, in the order presented. This is
+        what drives the traveller's app to show the right photos/details — never skip it, and
+        never include an id for a place you only mentioned in passing (a neighbourhood, landmark,
+        restaurant) rather than actually recommending as a place to stay.
+
+        Args:
+          hotel_ids: exact "id" values, copied verbatim from search_hotels results, of only the
+            hotels just presented as picks — not any other place named in the reply.
+        """
+        known = getattr(context, "known_hotels", {}) or {}
+        valid = [hid for hid in hotel_ids if hid in known]
+        if valid:
+            context.current_hotel_ids = valid
+            return f"Recommended hotels set: {valid}"
+        return "None of those ids matched known_hotels from the last search_hotels call — not applied."
 
     def select_hotel(hotel_id: str, hotel_name: str) -> str:
         """Call once the traveller has clearly chosen one of the hotels you presented.
@@ -120,7 +145,7 @@ def make_agent(context):
                 clarifying_question_instructions=clarifying_question_instructions("hotel_style"),
                 response_formatting_instructions=response_formatting_instructions(),
             ),
-            tools=[search_hotels, web_search, select_hotel],
+            tools=[search_hotels, web_search, recommend_hotels, select_hotel],
         ),
     )
     return chat

@@ -21,22 +21,6 @@ def extract_places(text: str, limit: int = 3) -> list:
     return seen
 
 
-def match_recommended_hotels(text: str, known_hotels: dict, limit: int = 4) -> list:
-    """Matches the bolded hotel names an agent's reply actually recommends against the real
-    hotel ids from search_hotels, so the hotels shown as images are exactly the ones the reply
-    is talking about — not just the first few results in the raw search response."""
-    names = extract_places(text, limit=limit + 2)
-    matched = []
-    for name in names:
-        for hotel_id, hotel_name in (known_hotels or {}).items():
-            if hotel_name and (name.lower() in hotel_name.lower() or hotel_name.lower() in name.lower()):
-                if hotel_id not in matched:
-                    matched.append(hotel_id)
-                break
-        if len(matched) >= limit:
-            break
-    return matched
-
 STAGE_AGENTS = {
     "DESTINATION_SPOTS": destination_spots.make_agent,
     "HOTEL_SEARCH": hotel_search.make_agent,
@@ -70,10 +54,10 @@ class Orchestrator:
             places = extract_places(text)
             if places:
                 self.context.current_places = places
-        elif self.context.stage == "HOTEL_SEARCH":
-            hotel_ids = match_recommended_hotels(text, self.context.known_hotels)
-            if hotel_ids:
-                self.context.current_hotel_ids = hotel_ids
+        # HOTEL_SEARCH: current_hotel_ids is set directly by the recommend_hotels tool call
+        # (see agents/hotel_search.py) — deterministic, not guessed from bolded text in the
+        # reply, since every place name gets bolded (neighbourhoods, landmarks, hotels alike)
+        # and that made text-matching prone to picking up unrelated hotels.
 
     def enter_llm_stage(self, stage: str, opener_override: str = None) -> str:
         self.context.stage = stage
