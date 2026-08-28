@@ -36,6 +36,22 @@ Rules:
 - Never use this format for anything except a genuine multiple-choice question to the traveller — never for
   your own destination/hotel recommendations or any other content."""
 
+def response_formatting_instructions() -> str:
+    return """Formatting rules for every reply you write (not just clarifying questions):
+- Wrap every named place, attraction, neighbourhood, or specific experience you mention in **bold**
+  markdown (e.g. **Burj Park**, **Love Lake**, **Global Village**, **yacht cruise**). Do this
+  consistently for every such name, every time — never leave a real place name unbolded.
+- If your reply ends with a direct question to the traveller (an invitation to continue, like
+  "Shall we map out a day-by-day plan for your trip?"), wrap ONLY that final question in double
+  hashes instead of asterisks, like this: ##Shall we map out a day-by-day plan for your trip?##
+  Use this exact ## marker (not ** bold) for that one closing question, and never use it for
+  anything else. If your reply doesn't end in a direct question, don't add one artificially —
+  just omit the ## marker that turn.
+- Never use the ## marker for the structured {"type": "clarifying_question", ...} JSON format
+  described above — that has its own separate rendering and must never be mixed with prose or
+  ## markers in the same message."""
+
+
 _client = None
 _booking_client = None
 

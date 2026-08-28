@@ -1,5 +1,5 @@
 from google.genai import types
-from llm import get_client, MODEL, today_context, clarifying_question_instructions
+from llm import get_client, MODEL, today_context, clarifying_question_instructions, response_formatting_instructions
 from tools.hotels import search_hotels as _search_hotels
 from tools.search import web_search
 
@@ -14,6 +14,8 @@ Already collected — do not ask for any of this again, just use it:
 - Budget: {budget_level}
 
 {clarifying_question_instructions}
+
+{response_formatting_instructions}
 
 Before you search, you MAY optionally ask one more clickable follow-up about hotel setting/style, if it would
 meaningfully help you pick better properties for {destination} — skip it if not particularly useful for this
@@ -116,6 +118,7 @@ def make_agent(context):
                 kids=context.kids,
                 budget_level=context.profile.get("budget_level"),
                 clarifying_question_instructions=clarifying_question_instructions("hotel_style"),
+                response_formatting_instructions=response_formatting_instructions(),
             ),
             tools=[search_hotels, web_search, select_hotel],
         ),

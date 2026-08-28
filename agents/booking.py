@@ -1,5 +1,5 @@
 from google.genai import types
-from llm import get_booking_client, MODEL, today_context, clarifying_question_instructions
+from llm import get_booking_client, MODEL, today_context, clarifying_question_instructions, response_formatting_instructions
 from tools.booking import (
     get_hotel_rates as _get_hotel_rates,
     prebook_rate as _prebook_rate,
@@ -20,6 +20,8 @@ Other hotels from the same search that were shown to the traveller, in case the 
 for these dates (id -> name): {other_hotels}
 
 {clarifying_question_instructions}
+
+{response_formatting_instructions}
 
 Follow this exact sequence, one step at a time, confirming with the traveller as you go:
 
@@ -198,6 +200,7 @@ def make_agent(context):
                 profile=context.profile,
                 other_hotels=other_hotels or "none",
                 clarifying_question_instructions=clarifying_question_instructions("hotel_confirm"),
+                response_formatting_instructions=response_formatting_instructions(),
             ),
             tools=[get_hotel_rates, prebook_rate, complete_booking, get_weather, return_to_hotel_search],
         ),

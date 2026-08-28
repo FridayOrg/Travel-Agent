@@ -1,5 +1,5 @@
 from google.genai import types
-from llm import get_client, MODEL, today_context, clarifying_question_instructions
+from llm import get_client, MODEL, today_context, clarifying_question_instructions, response_formatting_instructions
 from tools.search import web_search
 from tools.weather import get_weather
 
@@ -29,6 +29,8 @@ Keep replies SHORT and conversational — a few sentences or a tight bullet list
 multiple turns rather than one giant answer.
 
 {clarifying_question_instructions}
+
+{response_formatting_instructions}
 
 IMPORTANT — itinerary sequencing: do NOT build a day-by-day itinerary until you know the trip length. Once
 you've shared spot suggestions and the traveller seems happy with the direction (or after a couple of turns
@@ -90,6 +92,7 @@ def make_agent(context):
                 travellers_type=context.profile.get("travellers_type"),
                 month=context.profile.get("month"),
                 clarifying_question_instructions=clarifying_question_instructions("destination_spots"),
+                response_formatting_instructions=response_formatting_instructions(),
             ),
             tools=[web_search, get_weather, set_trip_duration, confirm_itinerary],
         ),
