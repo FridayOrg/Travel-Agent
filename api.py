@@ -65,6 +65,10 @@ class TtsBody(BaseModel):
     text: str
 
 
+class StaticAnswerBody(BaseModel):
+    text: str
+
+
 def state_payload(orch: Orchestrator) -> dict:
     ctx = orch.context
     return {
@@ -132,6 +136,65 @@ def hotel_dates(session_id: str, body: HotelDatesBody):
     ctx.checkout = body.checkout
     reply = orch.enter_llm_stage("HOTEL_SEARCH")
     return {"reply": reply, **state_payload(orch)}
+
+
+@app.post("/api/session/{session_id}/static-answer")
+def static_answer(session_id: str, body: StaticAnswerBody):
+    """Lets typed or voice-transcribed free text work identically to clicking one of the
+    static-stage buttons (INTAKE, HOTEL_TRAVELLERS, HOTEL_BUDGET, HOTEL_DATES). See
+    agents/answer_matcher.py — a narrow, closed-set match against that stage's real options,
+    not open-ended chat, so mandatory fields still can't be silently skipped.
+
+    Response envelope:
+      { "resolved": {...fields confidently matched from this one utterance...},
+        "missing": [...ids of fields still unresolved...],
+        "reply": str|None,     # present when resolution advanced to the next (LLM) stage
+        ...state_payload }
+    For INTAKE specifically, "resolved" may be partial (e.g. just destination) — the caller
+    should merge it into whatever's already been collected via buttons/prior free text and only
+    finalize (call POST .../intake) once all three fields are present, exactly like the button
+    flow already does. For the single-field hotel static stages, a resolved answer is applied
+    and the stage advances immediately, same as the equivalent structured endpoint.
+    """
+    from agents import answer_matcher
+
+    orch = get_orchestrator(session_id)
+    ctx = orch.context
+    text = body.text
+
+    if ctx.stage == "INTAKE":
+        matched = answer_matcher.match_intake(text)
+        missing = [k for k, v in matched.items() if v is None]
+        return {"resolved": {k: v for k, v in matched.items() if v is not None}, "missing": missing, "reply": None, **state_payload(orch)}
+
+    if ctx.stage == "HOTEL_TRAVELLERS":
+        matched = answer_matcher.match_hotel_travellers(text)
+        if matched["adults"] is None:
+            return {"resolved": {}, "missing": ["adults"], "reply": None, **state_payload(orch)}
+        ctx.adults = matched["adults"]
+        ctx.kids = matched["kids"]
+        ctx.stage = "HOTEL_BUDGET"
+        return {"resolved": matched, "missing": [], "reply": None, **state_payload(orch)}
+
+    if ctx.stage == "HOTEL_BUDGET":
+        matched = answer_matcher.match_hotel_budget(text)
+        if matched["budget_level"] is None:
+            return {"resolved": {}, "missing": ["budget_level"], "reply": None, **state_payload(orch)}
+        ctx.profile["budget_level"] = matched["budget_level"]
+        ctx.stage = "HOTEL_DATES"
+        return {"resolved": matched, "missing": [], "reply": None, **state_payload(orch)}
+
+    if ctx.stage == "HOTEL_DATES":
+        matched = answer_matcher.match_hotel_dates(text)
+        missing = [k for k, v in matched.items() if v is None]
+        if missing:
+            return {"resolved": {k: v for k, v in matched.items() if v is not None}, "missing": missing, "reply": None, **state_payload(orch)}
+        ctx.checkin = matched["checkin"]
+        ctx.checkout = matched["checkout"]
+        reply = orch.enter_llm_stage("HOTEL_SEARCH")
+        return {"resolved": matched, "missing": [], "reply": reply, **state_payload(orch)}
+
+    raise HTTPException(status_code=400, detail=f"Stage {ctx.stage!r} isn't a static question stage — use /message instead.")
 
 
 @app.get("/api/session/{session_id}/state")
