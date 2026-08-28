@@ -1,6 +1,5 @@
 """Resolves typed or voice-transcribed free text into the same structured answers a button
-click would produce, for the static (non-LLM) question stages: INTAKE, HOTEL_TRAVELLERS,
-HOTEL_BUDGET, HOTEL_DATES.
+click would produce, for the static (non-LLM) question stages: INTAKE, HOTEL_DETAILS.
 
 Deliberately a narrow, closed-set classification call — not an open-ended chat turn — so it
 stays reliable for fields that must never be silently skipped (the same reliability concern
@@ -16,6 +15,8 @@ from google.genai import types
 from llm import get_client, MODEL, today_context
 from static_stages import INTAKE_QUESTIONS, HOTEL_TRAVELLERS_QUESTION, HOTEL_BUDGET_QUESTION
 from tools.search import web_search
+
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def _ask_matcher(instructions: str) -> dict:
@@ -125,64 +126,41 @@ No other text."""
     }
 
 
-def match_hotel_travellers(text: str) -> dict:
-    """Returns {"adults": int|None, "kids": int}. None adults means no confident match."""
-    options = HOTEL_TRAVELLERS_QUESTION["options"]
-    prompt = f"""A traveller typed or spoke this instead of clicking a button: {json.dumps(text)}
+def match_hotel_details(text: str) -> dict:
+    """Returns {"adults": int|None, "kids": int, "budget_level": str|None,
+    "checkin": "YYYY-MM-DD"|None, "checkout": "YYYY-MM-DD"|None} — resolves whichever of the
+    three combined hotel-detail questions (travellers, budget, dates) the traveller addressed in
+    one utterance, the same batched-extraction pattern as match_intake."""
+    travellers_options = HOTEL_TRAVELLERS_QUESTION["options"]
+    budget_options = HOTEL_BUDGET_QUESTION["options"]
+    prompt = f"""{today_context()}
 
-They're answering "How many travellers?" (options shown were: {options}).
-Extract the number of adults and number of kids/children they mean. "2 Adults" = 2 adults, 0
-kids. "2 Adults + 1 Kid" = 2 adults, 1 kid. If they state different numbers (e.g. "3 adults and
-2 kids", "just the two of us", "me, my wife and our daughter"), work out the actual counts.
-Respond with ONLY a JSON object: {{"adults": <int or null if truly unclear>, "kids": <int, 0 if none mentioned>}}
+A traveller typed or spoke this instead of using the hotel-details form: {json.dumps(text)}
+
+The form asks THREE things together — how many travellers, budget range per night, and
+check-in/check-out dates. Extract whichever of these they actually stated (they may address
+one, two, or all three in one message):
+
+- "adults" / "kids": number of adult and child travellers they mean (e.g. presets like
+  {travellers_options[:-1]} map to specific counts, or work out actual numbers from something
+  like "3 adults and 2 kids" or "just the two of us"). null for adults if not stated at all.
+- "budget_level": if it clearly matches one of {budget_options[:-1]}, use that exact preset
+  spelling; otherwise return their own budget description verbatim. null if not stated at all.
+- "checkin" / "checkout": calendar dates (resolve relative phrases like "next month" against
+  today's real date above; nearest future occurrence for a bare month/day). null for either if
+  not stated at all.
+
+Respond with ONLY a JSON object: {{"adults": int or null, "kids": int (0 if not mentioned),
+"budget_level": string or null, "checkin": "YYYY-MM-DD" or null, "checkout": "YYYY-MM-DD" or null}}
 No other text."""
     data = _ask_matcher(prompt)
     adults = data.get("adults")
-    return {
-        "adults": adults if isinstance(adults, int) and adults > 0 else None,
-        "kids": data.get("kids") if isinstance(data.get("kids"), int) else 0,
-    }
-
-
-def match_hotel_budget(text: str) -> dict:
-    """Returns {"budget_level": str|None} — always resolves to a preset or the traveller's own
-    literal description (matching the "Other" free-text button), unless nothing budget-related
-    was said at all."""
-    options = HOTEL_BUDGET_QUESTION["options"]
-    prompt = f"""A traveller typed or spoke this instead of clicking a button: {json.dumps(text)}
-
-They're answering "What's your budget range per night?" (preset options were:
-{options[:-1]}, or a custom description).
-If it clearly matches one of {options[:-1]}, return that exact preset spelling. Otherwise, if
-they described a budget in their own words, return their description verbatim. Return null only
-if nothing budget-related was said at all.
-
-Respond with ONLY a JSON object: {{"budget_level": ... or null}}
-No other text."""
-    data = _ask_matcher(prompt)
-    return {"budget_level": data.get("budget_level") or None}
-
-
-_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-
-
-def match_hotel_dates(text: str) -> dict:
-    """Returns {"checkin": "YYYY-MM-DD"|None, "checkout": "YYYY-MM-DD"|None}."""
-    prompt = f"""{today_context()}
-
-A traveller typed or spoke this instead of using a date picker: {json.dumps(text)}
-
-They're stating their hotel check-in and check-out dates. Work out the actual calendar dates
-they mean (resolve relative phrases like "next month" or "the second week of October" against
-today's real date above; assume the nearest future occurrence for a bare month/day). Return
-null for either field if it truly can't be determined.
-
-Respond with ONLY a JSON object: {{"checkin": "YYYY-MM-DD" or null, "checkout": "YYYY-MM-DD" or null}}
-No other text."""
-    data = _ask_matcher(prompt)
     checkin = data.get("checkin")
     checkout = data.get("checkout")
     return {
+        "adults": adults if isinstance(adults, int) and adults > 0 else None,
+        "kids": data.get("kids") if isinstance(data.get("kids"), int) else 0,
+        "budget_level": data.get("budget_level") or None,
         "checkin": checkin if isinstance(checkin, str) and _DATE_RE.match(checkin) else None,
         "checkout": checkout if isinstance(checkout, str) and _DATE_RE.match(checkout) else None,
     }

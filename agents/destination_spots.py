@@ -100,7 +100,7 @@ def make_agent(context):
                 "share the matching itinerary before calling confirm_itinerary."
             )
         context.itinerary_confirmed = True
-        context.stage = "HOTEL_TRAVELLERS"
+        context.stage = "HOTEL_DETAILS"
         return "Itinerary confirmed — moving to hotel intake."
 
     client = get_client()

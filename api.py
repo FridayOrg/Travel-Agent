@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 from orchestrator import Orchestrator
 from config import ELEVENLABS_API_KEY
-from static_stages import INTAKE_QUESTIONS, HOTEL_TRAVELLERS_QUESTION, HOTEL_BUDGET_QUESTION
+from static_stages import INTAKE_QUESTIONS, HOTEL_DETAILS_QUESTIONS
 
 app = FastAPI(title="Evara Plan-with-AI backend")
 
@@ -48,16 +48,10 @@ class MessageBody(BaseModel):
     text: str
 
 
-class HotelTravellersBody(BaseModel):
+class HotelDetailsBody(BaseModel):
     adults: int
     kids: int = 0
-
-
-class HotelBudgetBody(BaseModel):
     budget_level: str
-
-
-class HotelDatesBody(BaseModel):
     checkin: str
     checkout: str
 
@@ -110,29 +104,16 @@ def send_message(session_id: str, body: MessageBody):
     return {"reply": reply, **state_payload(orch)}
 
 
-@app.post("/api/session/{session_id}/hotel-travellers")
-def hotel_travellers(session_id: str, body: HotelTravellersBody):
+@app.post("/api/session/{session_id}/hotel-details")
+def hotel_details(session_id: str, body: HotelDetailsBody):
+    """Number of travellers, budget, and dates submitted together as one combined form
+    (mirroring the intake form's batching), replacing the older sequential
+    hotel-travellers -> hotel-budget -> hotel-dates endpoints."""
     orch = get_orchestrator(session_id)
     ctx = orch.context
     ctx.adults = body.adults
     ctx.kids = body.kids
-    ctx.stage = "HOTEL_BUDGET"
-    return {**state_payload(orch)}
-
-
-@app.post("/api/session/{session_id}/hotel-budget")
-def hotel_budget(session_id: str, body: HotelBudgetBody):
-    orch = get_orchestrator(session_id)
-    ctx = orch.context
     ctx.profile["budget_level"] = body.budget_level
-    ctx.stage = "HOTEL_DATES"
-    return {**state_payload(orch)}
-
-
-@app.post("/api/session/{session_id}/hotel-dates")
-def hotel_dates(session_id: str, body: HotelDatesBody):
-    orch = get_orchestrator(session_id)
-    ctx = orch.context
     ctx.checkin = body.checkin
     ctx.checkout = body.checkout
     reply = orch.enter_llm_stage("HOTEL_SEARCH")
@@ -142,9 +123,9 @@ def hotel_dates(session_id: str, body: HotelDatesBody):
 @app.post("/api/session/{session_id}/static-answer")
 def static_answer(session_id: str, body: StaticAnswerBody):
     """Lets typed or voice-transcribed free text work identically to clicking one of the
-    static-stage buttons (INTAKE, HOTEL_TRAVELLERS, HOTEL_BUDGET, HOTEL_DATES). See
-    agents/answer_matcher.py — a narrow, closed-set match against that stage's real options,
-    not open-ended chat, so mandatory fields still can't be silently skipped.
+    static-stage buttons (INTAKE, HOTEL_DETAILS). See agents/answer_matcher.py — a narrow,
+    closed-set match against that stage's real options, not open-ended chat, so mandatory
+    fields still can't be silently skipped.
 
     Response envelope:
       { "resolved": {...fields confidently matched from this one utterance...},
@@ -179,9 +160,7 @@ def static_answer(session_id: str, body: StaticAnswerBody):
 
     pending_questions = {
         "INTAKE": " / ".join(q["question"] for q in INTAKE_QUESTIONS),
-        "HOTEL_TRAVELLERS": HOTEL_TRAVELLERS_QUESTION["question"],
-        "HOTEL_BUDGET": HOTEL_BUDGET_QUESTION["question"],
-        "HOTEL_DATES": "What are your check-in and check-out dates?",
+        "HOTEL_DETAILS": " / ".join(q["question"] for q in HOTEL_DETAILS_QUESTIONS),
     }
     if ctx.stage not in pending_questions:
         raise HTTPException(status_code=400, detail=f"Stage {ctx.stage!r} isn't a static question stage — use /message instead.")
@@ -196,9 +175,7 @@ def static_answer(session_id: str, body: StaticAnswerBody):
         reply = answer_matcher.answer_side_question(text, pending_questions[ctx.stage], ctx)
         missing = {
             "INTAKE": ["destination", "travellers", "month"],
-            "HOTEL_TRAVELLERS": ["adults"],
-            "HOTEL_BUDGET": ["budget_level"],
-            "HOTEL_DATES": ["checkin", "checkout"],
+            "HOTEL_DETAILS": ["travellers", "budget_level", "dates"],
         }[ctx.stage]
         return {"resolved": {}, "missing": missing, "reply": reply, **state_payload(orch)}
 
@@ -209,32 +186,52 @@ def static_answer(session_id: str, body: StaticAnswerBody):
         missing = [k for k, v in matched.items() if v is None]
         return {"resolved": resolved, "missing": missing, "reply": None, **state_payload(orch)}
 
-    if ctx.stage == "HOTEL_TRAVELLERS":
-        matched = answer_matcher.match_hotel_travellers(text)
-        if matched["adults"] is None:
-            return {"resolved": {}, "missing": ["adults"], "reply": None, **state_payload(orch)}
+    # HOTEL_DETAILS — three fields at once (travellers, budget, dates), same batching pattern
+    # as INTAKE. Whatever resolves is persisted onto the context immediately (context already
+    # has dedicated slots for each), so even a partial answer isn't lost between turns.
+    matched = answer_matcher.match_hotel_details(text)
+    resolved = {}
+    missing = []
+
+    if matched["adults"] is not None:
         ctx.adults = matched["adults"]
         ctx.kids = matched["kids"]
-        ctx.stage = "HOTEL_BUDGET"
-        return {"resolved": matched, "missing": [], "reply": None, **state_payload(orch)}
+        resolved["adults"] = matched["adults"]
+        resolved["kids"] = matched["kids"]
+    else:
+        missing.append("travellers")
 
-    if ctx.stage == "HOTEL_BUDGET":
-        matched = answer_matcher.match_hotel_budget(text)
-        if matched["budget_level"] is None:
-            return {"resolved": {}, "missing": ["budget_level"], "reply": None, **state_payload(orch)}
+    if matched["budget_level"] is not None:
         ctx.profile["budget_level"] = matched["budget_level"]
-        ctx.stage = "HOTEL_DATES"
-        return {"resolved": matched, "missing": [], "reply": None, **state_payload(orch)}
+        resolved["budget_level"] = matched["budget_level"]
+    else:
+        missing.append("budget_level")
 
-    matched = answer_matcher.match_hotel_dates(text)
-    missing = [k for k, v in matched.items() if v is None]
-    if missing:
-        resolved = {k: v for k, v in matched.items() if v is not None}
-        return {"resolved": resolved, "missing": missing, "reply": None, **state_payload(orch)}
-    ctx.checkin = matched["checkin"]
-    ctx.checkout = matched["checkout"]
+    if matched["checkin"] is not None and matched["checkout"] is not None:
+        ctx.checkin = matched["checkin"]
+        ctx.checkout = matched["checkout"]
+        resolved["checkin"] = matched["checkin"]
+        resolved["checkout"] = matched["checkout"]
+    else:
+        missing.append("dates")
+
+    # A field can already have been filled in by a prior turn (or a button click) even if this
+    # particular utterance didn't address it — only report it "missing" if it's still genuinely
+    # unset on the context.
+    still_missing = [
+        m for m in missing
+        if not (
+            (m == "travellers" and ctx.adults) or
+            (m == "budget_level" and ctx.profile.get("budget_level")) or
+            (m == "dates" and ctx.checkin and ctx.checkout)
+        )
+    ]
+
+    if still_missing:
+        return {"resolved": resolved, "missing": still_missing, "reply": None, **state_payload(orch)}
+
     reply = orch.enter_llm_stage("HOTEL_SEARCH")
-    return {"resolved": matched, "missing": [], "reply": reply, **state_payload(orch)}
+    return {"resolved": resolved, "missing": [], "reply": reply, **state_payload(orch)}
 
 
 @app.get("/api/session/{session_id}/state")
@@ -253,7 +250,7 @@ def get_images(session_id: str):
     orch = get_orchestrator(session_id)
     ctx = orch.context
 
-    hotel_stages = ("HOTEL_TRAVELLERS", "HOTEL_BUDGET", "HOTEL_DATES", "HOTEL_SEARCH", "BOOKING")
+    hotel_stages = ("HOTEL_DETAILS", "HOTEL_SEARCH", "BOOKING")
     if ctx.stage in hotel_stages:
         if ctx.stage == "BOOKING" and ctx.selected_hotel_id:
             entries = [get_hotel_images(ctx.selected_hotel_id, ctx.selected_hotel_name, ctx.known_hotels_raw)]

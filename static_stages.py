@@ -36,4 +36,14 @@ HOTEL_BUDGET_QUESTION = {
     "allow_other": True,
 }
 
-STATIC_STAGES = {"INTAKE", "HOTEL_TRAVELLERS", "HOTEL_BUDGET", "HOTEL_DATES"}
+HOTEL_DATES_QUESTION = {
+    "id": "hotel_dates",
+    "question": "What are your check-in and check-out dates?",
+    "type": "date_range",
+}
+
+# Shown together as one combined form (same batching pattern as INTAKE_QUESTIONS) instead of
+# three sequential single-question screens.
+HOTEL_DETAILS_QUESTIONS = [HOTEL_TRAVELLERS_QUESTION, HOTEL_BUDGET_QUESTION, HOTEL_DATES_QUESTION]
+
+STATIC_STAGES = {"INTAKE", "HOTEL_DETAILS"}

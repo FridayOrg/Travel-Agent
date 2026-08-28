@@ -21,6 +21,7 @@ if "orchestrator" not in st.session_state:
     st.session_state.last_voice_id = None
     st.session_state.awaiting_other_input = False
     st.session_state.intake_answers = {}
+    st.session_state.hotel_details_answers = {}
 
 with speaker_col:
     if ELEVENLABS_API_KEY:
@@ -226,85 +227,87 @@ def render_intake_form():
         enter_llm_stage_and_render("DESTINATION_SPOTS")
 
 
-# ----- Stage: HOTEL_TRAVELLERS -----
-def finish_hotel_travellers(adults: int, kids: int, label: str):
-    ctx.adults = adults
-    ctx.kids = kids
-    ctx.stage = "HOTEL_BUDGET"
-    add_message("user", label)
-    st.rerun()
+# ----- Stage: HOTEL_DETAILS (travellers + budget + dates shown together) -----
+def render_hotel_details_form():
+    st.markdown("**A few details for hotel search:**")
+    answers = st.session_state.hotel_details_answers
 
-
-def render_hotel_travellers_question():
-    q = HOTEL_TRAVELLERS_QUESTION
-    st.markdown(f"**{q['question']}**")
-
-    if st.session_state.get("hotel_travellers_other_active"):
-        adults = st.number_input("Adults", min_value=1, max_value=10, value=2, key="hotel_other_adults")
-        kids = st.number_input("Kids", min_value=0, max_value=10, value=0, key="hotel_other_kids")
-        if st.button("Submit", key="hotel_travellers_other_submit"):
-            finish_hotel_travellers(int(adults), int(kids), f"{int(adults)} Adults + {int(kids)} Kid(s)")
+    tq = HOTEL_TRAVELLERS_QUESTION
+    st.markdown(f"**{tq['question']}**")
+    if "travellers" in answers:
+        st.caption(f"✓ {answers['travellers'][2]}")
+    elif st.session_state.get("hd_travellers_other_active"):
+        adults = st.number_input("Adults", min_value=1, max_value=10, value=2, key="hd_other_adults")
+        kids = st.number_input("Kids", min_value=0, max_value=10, value=0, key="hd_other_kids")
+        if st.button("Submit", key="hd_travellers_other_submit"):
+            answers["travellers"] = (int(adults), int(kids), f"{int(adults)} Adults + {int(kids)} Kid(s)")
+            st.session_state.hd_travellers_other_active = False
+            st.rerun()
     else:
-        option_cols = st.columns(len(q["options"]))
-        for j, opt in enumerate(q["options"]):
+        option_cols = st.columns(len(tq["options"]))
+        for j, opt in enumerate(tq["options"]):
             with option_cols[j]:
-                if st.button(opt, key=f"hoteltrav_{j}", use_container_width=True):
+                if st.button(opt, key=f"hd_trav_{j}", use_container_width=True):
                     if opt == "Other":
-                        st.session_state.hotel_travellers_other_active = True
+                        st.session_state.hd_travellers_other_active = True
                         st.rerun()
                     elif opt == "2 Adults":
-                        finish_hotel_travellers(2, 0, opt)
+                        answers["travellers"] = (2, 0, opt)
+                        st.rerun()
                     elif opt == "2 Adults + 1 Kid":
-                        finish_hotel_travellers(2, 1, opt)
+                        answers["travellers"] = (2, 1, opt)
+                        st.rerun()
 
-
-# ----- Stage: HOTEL_BUDGET -----
-def finish_hotel_budget(budget_label: str):
-    ctx.profile["budget_level"] = budget_label
-    ctx.stage = "HOTEL_DATES"
-    add_message("user", budget_label)
-    st.rerun()
-
-
-def render_hotel_budget_question():
-    q = HOTEL_BUDGET_QUESTION
-    st.markdown(f"**{q['question']}**")
-
-    if st.session_state.get("hotel_budget_other_active"):
-        other_val = render_text_or_voice_input("hotel_budget_other")
+    bq = HOTEL_BUDGET_QUESTION
+    st.markdown(f"**{bq['question']}**")
+    if "budget" in answers:
+        st.caption(f"✓ {answers['budget']}")
+    elif st.session_state.get("hd_budget_other_active"):
+        other_val = render_text_or_voice_input("hd_budget_other")
         if other_val:
-            st.session_state.hotel_budget_other_active = False
-            finish_hotel_budget(other_val)
+            answers["budget"] = other_val
+            st.session_state.hd_budget_other_active = False
+            st.rerun()
     else:
-        option_cols = st.columns(len(q["options"]))
-        for j, opt in enumerate(q["options"]):
+        option_cols = st.columns(len(bq["options"]))
+        for j, opt in enumerate(bq["options"]):
             with option_cols[j]:
-                if st.button(opt, key=f"hotelbudget_{j}", use_container_width=True):
+                if st.button(opt, key=f"hd_budget_{j}", use_container_width=True):
                     if opt == "Other":
-                        st.session_state.hotel_budget_other_active = True
+                        st.session_state.hd_budget_other_active = True
                         st.rerun()
                     else:
-                        finish_hotel_budget(opt)
+                        answers["budget"] = opt
+                        st.rerun()
 
-
-# ----- Stage: HOTEL_DATES -----
-def render_hotel_dates_picker():
     st.markdown("**What are your check-in and check-out dates?**")
-    default_start = date.today() + timedelta(days=30)
-    default_end = default_start + timedelta(days=5)
-    picked = st.date_input(
-        "Dates", value=(default_start, default_end), key="hotel_dates_picker",
-        label_visibility="collapsed",
-    )
-    if isinstance(picked, tuple) and len(picked) == 2:
-        checkin, checkout = picked
-        if st.button("Confirm dates", key="hotel_dates_submit"):
-            ctx.checkin = checkin.isoformat()
-            ctx.checkout = checkout.isoformat()
-            add_message("user", f"{ctx.checkin} to {ctx.checkout}")
-            enter_llm_stage_and_render("HOTEL_SEARCH")
+    if "dates" in answers:
+        st.caption(f"✓ {answers['dates'][0]} to {answers['dates'][1]}")
     else:
-        st.caption("Pick both a check-in and check-out date.")
+        default_start = date.today() + timedelta(days=30)
+        default_end = default_start + timedelta(days=5)
+        picked = st.date_input(
+            "Dates", value=(default_start, default_end), key="hd_dates_picker",
+            label_visibility="collapsed",
+        )
+        if isinstance(picked, tuple) and len(picked) == 2:
+            checkin, checkout = picked
+            if st.button("Confirm dates", key="hd_dates_submit"):
+                answers["dates"] = (checkin.isoformat(), checkout.isoformat())
+                st.rerun()
+        else:
+            st.caption("Pick both a check-in and check-out date.")
+
+    if all(k in answers for k in ("travellers", "budget", "dates")):
+        adults, kids, travellers_label = answers["travellers"]
+        ctx.adults = adults
+        ctx.kids = kids
+        ctx.profile["budget_level"] = answers["budget"]
+        ctx.checkin, ctx.checkout = answers["dates"]
+
+        summary = f"{travellers_label}, {answers['budget']}, {ctx.checkin} to {ctx.checkout}"
+        add_message("user", summary)
+        enter_llm_stage_and_render("HOTEL_SEARCH")
 
 
 # ----- Chat input row for LLM-driven stages -----
@@ -354,11 +357,7 @@ def render_chat_input():
 # ----- Dispatch on stage -----
 if ctx.stage == "INTAKE":
     render_intake_form()
-elif ctx.stage == "HOTEL_TRAVELLERS":
-    render_hotel_travellers_question()
-elif ctx.stage == "HOTEL_BUDGET":
-    render_hotel_budget_question()
-elif ctx.stage == "HOTEL_DATES":
-    render_hotel_dates_picker()
+elif ctx.stage == "HOTEL_DETAILS":
+    render_hotel_details_form()
 else:
     render_chat_input()
