@@ -149,58 +149,70 @@ def static_answer(session_id: str, body: StaticAnswerBody):
     Response envelope:
       { "resolved": {...fields confidently matched from this one utterance...},
         "missing": [...ids of fields still unresolved...],
-        "reply": str|None,     # a real answer/reply to show the traveller — present either when
-                                # resolution advanced into the next (LLM) stage, OR when nothing
-                                # matched at all and the text looked like a genuine side question
-                                # instead of an answer attempt (see answer_side_question below)
+        "reply": str|None,     # a real message to show the traveller: present when resolution
+                                # advanced into the next (LLM) stage, when the text was a genuine
+                                # side question (answered, then steers back), or when it was a
+                                # request to change something already decided (routed back into
+                                # the destination_spots agent, whose own reply is returned here)
         ...state_payload }
+    Every message is classified into exactly one of three intents first (agents/answer_matcher's
+    classify_intent): "answer" (attempting to answer the pending question — handled by the
+    per-stage matchers below, same as before), "question" (an unrelated informational
+    question/side comment — answered directly via web-search-grounded answer_side_question,
+    steering back to the pending question, stage unchanged), or "change_request" (asking to
+    revisit something already decided earlier, e.g. a different destination or the itinerary —
+    routed back into the destination_spots agent via handle_change_request, which owns modifying
+    the itinerary or calling change_destination; the traveller returns to hotel questions once
+    they reconfirm there, exactly like the normal itinerary-confirmation flow).
+
     For INTAKE specifically, "resolved" may be partial (e.g. just destination) — the caller
     should merge it into whatever's already been collected via buttons/prior free text and only
     finalize (call POST .../intake) once all three fields are present, exactly like the button
     flow already does. For the single-field hotel static stages, a resolved answer is applied
     and the stage advances immediately, same as the equivalent structured endpoint.
-
-    If NOTHING at all matched, the traveller is very likely asking a real question or making a
-    side comment rather than answering — the response still has "reply" populated with a real,
-    grounded answer (steering back to the pending question), the same static stage stays active,
-    and the caller should just render "reply" as a normal chat message alongside the still-shown
-    form/buttons rather than treating it as an error.
     """
     from agents import answer_matcher
-
-    def looks_like_question(t: str) -> bool:
-        t = t.strip().lower()
-        if "?" in t:
-            return True
-        return t.split(" ", 1)[0] in (
-            "what", "when", "where", "why", "how", "who", "which", "is", "are", "can", "could",
-            "do", "does", "did", "will", "would", "should",
-        )
 
     orch = get_orchestrator(session_id)
     ctx = orch.context
     text = body.text
 
+    pending_questions = {
+        "INTAKE": " / ".join(q["question"] for q in INTAKE_QUESTIONS),
+        "HOTEL_TRAVELLERS": HOTEL_TRAVELLERS_QUESTION["question"],
+        "HOTEL_BUDGET": HOTEL_BUDGET_QUESTION["question"],
+        "HOTEL_DATES": "What are your check-in and check-out dates?",
+    }
+    if ctx.stage not in pending_questions:
+        raise HTTPException(status_code=400, detail=f"Stage {ctx.stage!r} isn't a static question stage — use /message instead.")
+
+    intent = answer_matcher.classify_intent(text, pending_questions[ctx.stage])
+
+    if intent == "change_request":
+        reply, new_stage = answer_matcher.handle_change_request(text, orch)
+        return {"resolved": {}, "missing": [], "reply": reply, **state_payload(orch)}
+
+    if intent == "question":
+        reply = answer_matcher.answer_side_question(text, pending_questions[ctx.stage], ctx)
+        missing = {
+            "INTAKE": ["destination", "travellers", "month"],
+            "HOTEL_TRAVELLERS": ["adults"],
+            "HOTEL_BUDGET": ["budget_level"],
+            "HOTEL_DATES": ["checkin", "checkout"],
+        }[ctx.stage]
+        return {"resolved": {}, "missing": missing, "reply": reply, **state_payload(orch)}
+
+    # intent == "answer" — proceed with the existing per-stage structured matching.
     if ctx.stage == "INTAKE":
         matched = answer_matcher.match_intake(text)
         resolved = {k: v for k, v in matched.items() if v is not None}
         missing = [k for k, v in matched.items() if v is None]
-        reply = None
-        if not resolved or looks_like_question(text):
-            pending = " / ".join(q["question"] for q in INTAKE_QUESTIONS)
-            reply = answer_matcher.answer_side_question(text, pending, ctx)
-        return {"resolved": resolved, "missing": missing, "reply": reply, **state_payload(orch)}
+        return {"resolved": resolved, "missing": missing, "reply": None, **state_payload(orch)}
 
     if ctx.stage == "HOTEL_TRAVELLERS":
         matched = answer_matcher.match_hotel_travellers(text)
-        if matched["adults"] is None or looks_like_question(text):
-            reply = answer_matcher.answer_side_question(text, HOTEL_TRAVELLERS_QUESTION["question"], ctx)
-            if matched["adults"] is None:
-                return {"resolved": {}, "missing": ["adults"], "reply": reply, **state_payload(orch)}
-            ctx.adults = matched["adults"]
-            ctx.kids = matched["kids"]
-            ctx.stage = "HOTEL_BUDGET"
-            return {"resolved": matched, "missing": [], "reply": reply, **state_payload(orch)}
+        if matched["adults"] is None:
+            return {"resolved": {}, "missing": ["adults"], "reply": None, **state_payload(orch)}
         ctx.adults = matched["adults"]
         ctx.kids = matched["kids"]
         ctx.stage = "HOTEL_BUDGET"
@@ -208,37 +220,21 @@ def static_answer(session_id: str, body: StaticAnswerBody):
 
     if ctx.stage == "HOTEL_BUDGET":
         matched = answer_matcher.match_hotel_budget(text)
-        if matched["budget_level"] is None or looks_like_question(text):
-            reply = answer_matcher.answer_side_question(text, HOTEL_BUDGET_QUESTION["question"], ctx)
-            if matched["budget_level"] is None:
-                return {"resolved": {}, "missing": ["budget_level"], "reply": reply, **state_payload(orch)}
-            ctx.profile["budget_level"] = matched["budget_level"]
-            ctx.stage = "HOTEL_DATES"
-            return {"resolved": matched, "missing": [], "reply": reply, **state_payload(orch)}
+        if matched["budget_level"] is None:
+            return {"resolved": {}, "missing": ["budget_level"], "reply": None, **state_payload(orch)}
         ctx.profile["budget_level"] = matched["budget_level"]
         ctx.stage = "HOTEL_DATES"
         return {"resolved": matched, "missing": [], "reply": None, **state_payload(orch)}
 
-    if ctx.stage == "HOTEL_DATES":
-        matched = answer_matcher.match_hotel_dates(text)
-        missing = [k for k, v in matched.items() if v is None]
-        if missing or looks_like_question(text):
-            resolved = {k: v for k, v in matched.items() if v is not None}
-            reply = None
-            if not resolved or looks_like_question(text):
-                reply = answer_matcher.answer_side_question(text, "What are your check-in and check-out dates?", ctx)
-            if missing:
-                return {"resolved": resolved, "missing": missing, "reply": reply, **state_payload(orch)}
-            ctx.checkin = matched["checkin"]
-            ctx.checkout = matched["checkout"]
-            search_reply = orch.enter_llm_stage("HOTEL_SEARCH")
-            return {"resolved": matched, "missing": [], "reply": (reply + "\n\n" + search_reply) if reply else search_reply, **state_payload(orch)}
-        ctx.checkin = matched["checkin"]
-        ctx.checkout = matched["checkout"]
-        reply = orch.enter_llm_stage("HOTEL_SEARCH")
-        return {"resolved": matched, "missing": [], "reply": reply, **state_payload(orch)}
-
-    raise HTTPException(status_code=400, detail=f"Stage {ctx.stage!r} isn't a static question stage — use /message instead.")
+    matched = answer_matcher.match_hotel_dates(text)
+    missing = [k for k, v in matched.items() if v is None]
+    if missing:
+        resolved = {k: v for k, v in matched.items() if v is not None}
+        return {"resolved": resolved, "missing": missing, "reply": None, **state_payload(orch)}
+    ctx.checkin = matched["checkin"]
+    ctx.checkout = matched["checkout"]
+    reply = orch.enter_llm_stage("HOTEL_SEARCH")
+    return {"resolved": matched, "missing": [], "reply": reply, **state_payload(orch)}
 
 
 @app.get("/api/session/{session_id}/state")

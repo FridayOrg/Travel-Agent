@@ -31,6 +31,61 @@ def _ask_matcher(instructions: str) -> dict:
         return {}
 
 
+def classify_intent(text: str, pending_question: str) -> str:
+    """Classifies free text against the currently pending static question into exactly one of:
+    - "answer": an attempt to answer the pending question (even if oddly worded/synonymous)
+    - "question": a genuine informational question/side comment not requiring any earlier
+      decision to change (e.g. "what's the weather like there?")
+    - "change_request": a request to change or revisit something ALREADY DECIDED earlier in the
+      conversation that is NOT the current pending question — e.g. a different destination, or
+      regenerating/modifying the itinerary. ("actually make it 3 adults" while being asked the
+      travellers question is just answering differently, NOT a change_request — this label is
+      only for requests about something from an earlier stage.)
+    Kept as a small, fast, single-word classification call — not the heavier field-matching or
+    question-answering calls, which only run after this decides which path applies.
+    """
+    prompt = f"""A traveller is currently being asked: "{pending_question}"
+
+They said: {json.dumps(text)}
+
+Classify what they mean, choosing exactly one:
+- "answer" — attempting to answer the pending question above (even inexactly).
+- "question" — asking something informational (facts, weather, prices, general questions) that
+  doesn't require changing any earlier trip decision.
+- "change_request" — asking to change or revisit something ALREADY DECIDED earlier in the
+  conversation that isn't the current pending question — e.g. a different destination, or
+  regenerating/modifying the itinerary.
+
+Respond with ONLY one word: answer, question, or change_request"""
+    client = get_client()
+    resp = client.models.generate_content(model=MODEL, contents=prompt)
+    label = (resp.text or "").strip().lower()
+    if "change" in label:
+        return "change_request"
+    if "question" in label:
+        return "question"
+    return "answer"
+
+
+def handle_change_request(text: str, orchestrator) -> tuple[str, str]:
+    """Routes a mid-flow "change something already decided" request back into the consultative
+    destination_spots agent (which already knows how to modify an itinerary or change_destination
+    — see agents/destination_spots.py), carrying the traveller's actual request as the opener
+    instead of the normal canned greeting. Returns (reply, new_stage)."""
+    opener = (
+        f"While filling out hotel details, the traveller just said: {json.dumps(text)}\n\n"
+        "This means they want to change or revisit something already decided (a different "
+        "destination, the itinerary, etc.) rather than continue with hotel details right now. "
+        "Address their request directly — if they want a different destination, call "
+        "change_destination and then help plan for the new place; if they want the itinerary "
+        "changed, revise it. Once whatever they need is resolved and they've explicitly "
+        "confirmed they're ready (the usual itinerary confirmation), they'll automatically move "
+        "back into the hotel questions."
+    )
+    reply = orchestrator.enter_llm_stage("DESTINATION_SPOTS", opener_override=opener)
+    return reply, orchestrator.context.stage
+
+
 def match_intake(text: str) -> dict:
     """Returns {"destination": str|None, "travellers": str|None, "month": str|None}.
     destination/month always resolve to something (a preset or the literal value stated,

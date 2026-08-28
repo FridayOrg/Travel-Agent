@@ -28,6 +28,11 @@ Two things to always weave in:
 Keep replies SHORT and conversational — a few sentences or a tight bullet list per turn, building detail over
 multiple turns rather than one giant answer.
 
+If the traveller asks to change their destination to somewhere else (e.g. "let's go to Singapore instead"),
+call change_destination with the new place first, then continue exactly as if this were their destination
+from the start — suggest real spots there, ask trip duration again, build a fresh itinerary, and confirm it,
+all grounded in web_search for the NEW destination.
+
 {clarifying_question_instructions}
 
 {response_formatting_instructions}
@@ -57,6 +62,22 @@ specifically.
 
 
 def make_agent(context):
+    def change_destination(new_destination: str) -> str:
+        """Call when the traveller explicitly wants to change their destination to somewhere
+        different (whether starting fresh or asking mid-flow, e.g. "actually let's go to
+        Singapore instead"). Resets the itinerary/duration so a proper fresh one gets built for
+        the new place before they move on to hotels.
+
+        Args:
+          new_destination: the new destination the traveller actually wants
+        """
+        context.destination = new_destination
+        context.profile["destination"] = new_destination
+        context.trip_duration_days = None
+        context.trip_duration_label = None
+        context.itinerary_confirmed = False
+        return f"Destination changed to {new_destination}. Continue as if this were the destination from the start."
+
     def set_trip_duration(days: int, label: str) -> str:
         """Call once the traveller has answered how many days their trip is, before building any itinerary.
 
@@ -94,7 +115,7 @@ def make_agent(context):
                 clarifying_question_instructions=clarifying_question_instructions("destination_spots"),
                 response_formatting_instructions=response_formatting_instructions(),
             ),
-            tools=[web_search, get_weather, set_trip_duration, confirm_itinerary],
+            tools=[web_search, get_weather, change_destination, set_trip_duration, confirm_itinerary],
         ),
     )
     return chat

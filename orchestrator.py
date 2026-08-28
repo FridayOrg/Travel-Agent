@@ -75,10 +75,10 @@ class Orchestrator:
             if hotel_ids:
                 self.context.current_hotel_ids = hotel_ids
 
-    def enter_llm_stage(self, stage: str) -> str:
+    def enter_llm_stage(self, stage: str, opener_override: str = None) -> str:
         self.context.stage = stage
         self._chat = STAGE_AGENTS[stage](self.context)
-        opener = STAGE_OPENERS[stage].format(
+        opener = opener_override or STAGE_OPENERS[stage].format(
             destination=self.context.destination,
             travellers_type=self.context.profile.get("travellers_type"),
             month=self.context.profile.get("month"),
