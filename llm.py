@@ -41,12 +41,15 @@ def response_formatting_instructions() -> str:
 - Wrap every named place, attraction, neighbourhood, or specific experience you mention in **bold**
   markdown (e.g. **Burj Park**, **Love Lake**, **Global Village**, **yacht cruise**). Do this
   consistently for every such name, every time — never leave a real place name unbolded.
-- If your reply ends with a direct question to the traveller (an invitation to continue, like
-  "Shall we map out a day-by-day plan for your trip?"), wrap ONLY that final question in double
-  hashes instead of asterisks, like this: ##Shall we map out a day-by-day plan for your trip?##
-  Use this exact ## marker (not ** bold) for that one closing question, and never use it for
-  anything else. If your reply doesn't end in a direct question, don't add one artificially —
-  just omit the ## marker that turn.
+- If your reply ends with a direct question to the traveller (an invitation to continue), wrap
+  ONLY that final question in double hashes instead of asterisks, e.g. ##<your question here>##.
+  The question itself must always be about what you just said THIS turn — e.g. if you were
+  discussing hotels, ask about choosing/continuing with a hotel, not about building an itinerary;
+  if you were discussing spots/activities, ask about the itinerary. Never reuse a stock question
+  from a different stage of the conversation just because it sounds like a natural closer — write
+  a fresh one that actually fits what you just told them. Use this exact ## marker (not ** bold)
+  for that one closing question, and never use it for anything else. If your reply doesn't end in
+  a direct question, don't add one artificially — just omit the ## marker that turn.
 - Never use the ## marker for the structured {"type": "clarifying_question", ...} JSON format
   described above — that has its own separate rendering and must never be mixed with prose or
   ## markers in the same message."""
