@@ -11,8 +11,11 @@ future static question automatically gets matching for free.
 import json
 import re
 
+from google.genai import types
+
 from llm import get_client, MODEL, today_context
 from static_stages import INTAKE_QUESTIONS, HOTEL_TRAVELLERS_QUESTION, HOTEL_BUDGET_QUESTION
+from tools.search import web_search
 
 
 def _ask_matcher(instructions: str) -> dict:
@@ -38,17 +41,24 @@ def match_intake(text: str) -> dict:
 
 A traveller typed or spoke this instead of clicking a button: {json.dumps(text)}
 
+IMPORTANT: only extract a field if they are STATING their own preference/choice for it. If they
+are instead ASKING a question (e.g. "what's the weather like in Dubai?", "how much would Dubai
+cost?", "is Dubai safe in October?") or just mentioning a place/time/group in passing while
+asking about something else, that does NOT count as stating a preference — return null for that
+field even though the word appears in their message. A mention only counts if they are telling
+you that's their actual choice (e.g. "Dubai", "I want to go to Dubai", "let's do Dubai").
+
 Extract up to three fields from it:
-- "destination": if they name a place, return it. If it matches one of {fields_desc['destination'][:-1]}
-  use that exact preset spelling; otherwise return the actual place name they said verbatim.
-  Return null only if no destination is mentioned at all.
+- "destination": if they are STATING a destination preference, return it. If it matches one of
+  {fields_desc['destination'][:-1]} use that exact preset spelling; otherwise return the actual
+  place name they said verbatim. Return null if no destination preference is being stated.
 - "travellers": must be exactly one of {fields_desc['travellers']} (match synonyms, e.g. "just me"
   -> "Solo", "my partner and I" -> "Couple", "my parents and kids" -> "Family"). Return null if
-  not mentioned or genuinely unclear.
-- "month": if they name a timeframe, return it. If it clearly matches one of
-  {fields_desc['month'][:-1]}, use that exact preset spelling; otherwise return the actual
-  month/timeframe they said verbatim (e.g. "next March" -> "March"). Return null only if no
-  timing is mentioned at all.
+  not being stated or genuinely unclear.
+- "month": if they are STATING a travel timeframe preference, return it. If it clearly matches
+  one of {fields_desc['month'][:-1]}, use that exact preset spelling; otherwise return the actual
+  month/timeframe they said verbatim (e.g. "next March" -> "March"). Return null if no timing
+  preference is being stated.
 
 Respond with ONLY a JSON object: {{"destination": ..., "travellers": ..., "month": ...}}
 No other text."""
@@ -121,3 +131,46 @@ No other text."""
         "checkin": checkin if isinstance(checkin, str) and _DATE_RE.match(checkin) else None,
         "checkout": checkout if isinstance(checkout, str) and _DATE_RE.match(checkout) else None,
     }
+
+
+def answer_side_question(text: str, pending_question: str, context) -> str:
+    """When free text during a static stage doesn't resolve to an answer for the pending
+    question, the traveller is very likely asking something else instead (a real question, a
+    side comment) — this gives it a real, grounded reply (web_search-backed, never invented)
+    rather than just re-showing the form silently. Always ends by steering back to the pending
+    question so the flow isn't lost.
+    """
+    known_bits = []
+    if getattr(context, "destination", None):
+        known_bits.append(f"Destination so far: {context.destination}")
+    if getattr(context, "profile", None):
+        for k, v in context.profile.items():
+            if v:
+                known_bits.append(f"{k}: {v}")
+    known = "\n".join(known_bits) or "Nothing collected yet."
+
+    client = get_client()
+    prompt = f"""{today_context()}
+
+You are a travel consultant chatbot. The traveller is currently being asked this question by
+the app's guided form: "{pending_question}"
+
+What they just said instead of answering it: {json.dumps(text)}
+
+What's already known about their trip so far:
+{known}
+
+If what they said is a genuine question or side comment (not an attempt to answer the pending
+question), answer it briefly and honestly — use web_search if it needs a real fact you don't
+already know (never invent specifics like prices, dates, or facts). If it doesn't look like a
+real question either (e.g. unclear noise), just say so plainly. Either way, end your reply by
+gently steering them back to the pending question above, in your own natural words.
+
+Keep the whole reply SHORT — 2-4 sentences."""
+
+    chat = client.chats.create(
+        model=MODEL,
+        config=types.GenerateContentConfig(tools=[web_search]),
+    )
+    resp = chat.send_message(prompt)
+    return (resp.text or "").strip() or "I'm not sure I follow — could you let me know your answer to the question above?"

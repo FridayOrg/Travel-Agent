@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from orchestrator import Orchestrator
 from config import ELEVENLABS_API_KEY
+from static_stages import INTAKE_QUESTIONS, HOTEL_TRAVELLERS_QUESTION, HOTEL_BUDGET_QUESTION
 
 app = FastAPI(title="Evara Plan-with-AI backend")
 
@@ -148,15 +149,33 @@ def static_answer(session_id: str, body: StaticAnswerBody):
     Response envelope:
       { "resolved": {...fields confidently matched from this one utterance...},
         "missing": [...ids of fields still unresolved...],
-        "reply": str|None,     # present when resolution advanced to the next (LLM) stage
+        "reply": str|None,     # a real answer/reply to show the traveller — present either when
+                                # resolution advanced into the next (LLM) stage, OR when nothing
+                                # matched at all and the text looked like a genuine side question
+                                # instead of an answer attempt (see answer_side_question below)
         ...state_payload }
     For INTAKE specifically, "resolved" may be partial (e.g. just destination) — the caller
     should merge it into whatever's already been collected via buttons/prior free text and only
     finalize (call POST .../intake) once all three fields are present, exactly like the button
     flow already does. For the single-field hotel static stages, a resolved answer is applied
     and the stage advances immediately, same as the equivalent structured endpoint.
+
+    If NOTHING at all matched, the traveller is very likely asking a real question or making a
+    side comment rather than answering — the response still has "reply" populated with a real,
+    grounded answer (steering back to the pending question), the same static stage stays active,
+    and the caller should just render "reply" as a normal chat message alongside the still-shown
+    form/buttons rather than treating it as an error.
     """
     from agents import answer_matcher
+
+    def looks_like_question(t: str) -> bool:
+        t = t.strip().lower()
+        if "?" in t:
+            return True
+        return t.split(" ", 1)[0] in (
+            "what", "when", "where", "why", "how", "who", "which", "is", "are", "can", "could",
+            "do", "does", "did", "will", "would", "should",
+        )
 
     orch = get_orchestrator(session_id)
     ctx = orch.context
@@ -164,13 +183,24 @@ def static_answer(session_id: str, body: StaticAnswerBody):
 
     if ctx.stage == "INTAKE":
         matched = answer_matcher.match_intake(text)
+        resolved = {k: v for k, v in matched.items() if v is not None}
         missing = [k for k, v in matched.items() if v is None]
-        return {"resolved": {k: v for k, v in matched.items() if v is not None}, "missing": missing, "reply": None, **state_payload(orch)}
+        reply = None
+        if not resolved or looks_like_question(text):
+            pending = " / ".join(q["question"] for q in INTAKE_QUESTIONS)
+            reply = answer_matcher.answer_side_question(text, pending, ctx)
+        return {"resolved": resolved, "missing": missing, "reply": reply, **state_payload(orch)}
 
     if ctx.stage == "HOTEL_TRAVELLERS":
         matched = answer_matcher.match_hotel_travellers(text)
-        if matched["adults"] is None:
-            return {"resolved": {}, "missing": ["adults"], "reply": None, **state_payload(orch)}
+        if matched["adults"] is None or looks_like_question(text):
+            reply = answer_matcher.answer_side_question(text, HOTEL_TRAVELLERS_QUESTION["question"], ctx)
+            if matched["adults"] is None:
+                return {"resolved": {}, "missing": ["adults"], "reply": reply, **state_payload(orch)}
+            ctx.adults = matched["adults"]
+            ctx.kids = matched["kids"]
+            ctx.stage = "HOTEL_BUDGET"
+            return {"resolved": matched, "missing": [], "reply": reply, **state_payload(orch)}
         ctx.adults = matched["adults"]
         ctx.kids = matched["kids"]
         ctx.stage = "HOTEL_BUDGET"
@@ -178,8 +208,13 @@ def static_answer(session_id: str, body: StaticAnswerBody):
 
     if ctx.stage == "HOTEL_BUDGET":
         matched = answer_matcher.match_hotel_budget(text)
-        if matched["budget_level"] is None:
-            return {"resolved": {}, "missing": ["budget_level"], "reply": None, **state_payload(orch)}
+        if matched["budget_level"] is None or looks_like_question(text):
+            reply = answer_matcher.answer_side_question(text, HOTEL_BUDGET_QUESTION["question"], ctx)
+            if matched["budget_level"] is None:
+                return {"resolved": {}, "missing": ["budget_level"], "reply": reply, **state_payload(orch)}
+            ctx.profile["budget_level"] = matched["budget_level"]
+            ctx.stage = "HOTEL_DATES"
+            return {"resolved": matched, "missing": [], "reply": reply, **state_payload(orch)}
         ctx.profile["budget_level"] = matched["budget_level"]
         ctx.stage = "HOTEL_DATES"
         return {"resolved": matched, "missing": [], "reply": None, **state_payload(orch)}
@@ -187,8 +222,17 @@ def static_answer(session_id: str, body: StaticAnswerBody):
     if ctx.stage == "HOTEL_DATES":
         matched = answer_matcher.match_hotel_dates(text)
         missing = [k for k, v in matched.items() if v is None]
-        if missing:
-            return {"resolved": {k: v for k, v in matched.items() if v is not None}, "missing": missing, "reply": None, **state_payload(orch)}
+        if missing or looks_like_question(text):
+            resolved = {k: v for k, v in matched.items() if v is not None}
+            reply = None
+            if not resolved or looks_like_question(text):
+                reply = answer_matcher.answer_side_question(text, "What are your check-in and check-out dates?", ctx)
+            if missing:
+                return {"resolved": resolved, "missing": missing, "reply": reply, **state_payload(orch)}
+            ctx.checkin = matched["checkin"]
+            ctx.checkout = matched["checkout"]
+            search_reply = orch.enter_llm_stage("HOTEL_SEARCH")
+            return {"resolved": matched, "missing": [], "reply": (reply + "\n\n" + search_reply) if reply else search_reply, **state_payload(orch)}
         ctx.checkin = matched["checkin"]
         ctx.checkout = matched["checkout"]
         reply = orch.enter_llm_stage("HOTEL_SEARCH")
