@@ -4,7 +4,7 @@ from datetime import date
 
 from google import genai
 from google.genai import errors
-from config import GEMINI_API_KEY, BOOKING_GEMINI_API_KEY
+from config import GEMINI_API_KEY, BOOKING_GEMINI_API_KEY, STT_GEMINI_API_KEY
 
 MODEL = "gemini-flash-lite-latest"
 
@@ -54,6 +54,7 @@ def response_formatting_instructions() -> str:
 
 _client = None
 _booking_client = None
+_stt_client = None
 
 
 def get_client():
@@ -75,6 +76,17 @@ def get_booking_client():
             raise RuntimeError("BOOKING_GEMINI_API_KEY (or GEMINI_API_KEY) is missing from .env")
         _booking_client = genai.Client(api_key=BOOKING_GEMINI_API_KEY)
     return _booking_client
+
+
+def get_stt_client():
+    """Separate Gemini client/API key for speech-to-text (replacing ElevenLabs STT), so voice
+    transcription doesn't contend with the other agents' shared quota either."""
+    global _stt_client
+    if _stt_client is None:
+        if not STT_GEMINI_API_KEY:
+            raise RuntimeError("STT_GEMINI_API_KEY (or GEMINI_API_KEY) is missing from .env")
+        _stt_client = genai.Client(api_key=STT_GEMINI_API_KEY)
+    return _stt_client
 
 
 def send_with_retry(chat, message: str, max_retries: int = 8):

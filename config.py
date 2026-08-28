@@ -8,6 +8,9 @@ GEMINI_API_KEY = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_
 # Separate key for the booking agent so its quota doesn't contend with the other agents'
 # shared free-tier quota (booking is the last, most time-sensitive step in the flow).
 BOOKING_GEMINI_API_KEY = os.environ.get("BOOKING_GEMINI_API_KEY") or GEMINI_API_KEY
+# Separate key for speech-to-text (Gemini's own audio transcription, replacing ElevenLabs STT)
+# so its usage doesn't contend with the other agents' shared quota either.
+STT_GEMINI_API_KEY = os.environ.get("STT_GEMINI_API_KEY") or GEMINI_API_KEY
 LITEAPI_API_KEY = os.environ.get("LITEAPI_API_KEY")
 ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY")
 
