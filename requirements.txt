@@ -6,3 +6,4 @@ streamlit
 fastapi
 uvicorn[standard]
 pydantic
+python-multipart

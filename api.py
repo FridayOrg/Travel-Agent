@@ -9,13 +9,13 @@ Run with: uvicorn api:app --port 8000 --reload
 import io
 import uuid
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from orchestrator import Orchestrator
-from config import ELEVENLABS_API_KEY
+from config import ELEVENLABS_API_KEY, STT_GEMINI_API_KEY
 from static_stages import INTAKE_QUESTIONS, HOTEL_DETAILS_QUESTIONS
 
 app = FastAPI(title="Evara Plan-with-AI backend")
@@ -316,3 +316,15 @@ def tts(session_id: str, body: TtsBody):
 
     audio_bytes = text_to_speech(body.text)
     return StreamingResponse(io.BytesIO(audio_bytes), media_type="audio/mpeg")
+
+
+@app.post("/api/session/{session_id}/stt")
+async def stt(session_id: str, audio: UploadFile = File(...)):
+    get_orchestrator(session_id)  # validates the session exists
+    if not STT_GEMINI_API_KEY:
+        raise HTTPException(status_code=503, detail="Voice input not configured")
+    from tools.voice import speech_to_text
+
+    audio_bytes = await audio.read()
+    text = speech_to_text(audio_bytes, filename=audio.filename or "audio.wav")
+    return {"text": text}
