@@ -25,14 +25,27 @@ def search_hotels(city: str, country_code: str, check_in: str, check_out: str, a
                      "step isn't wired up yet."
         }
 
-    resp = requests.get(
-        SEARCH_URL,
-        params={"cityName": city, "countryCode": country_code},
-        headers={"X-API-Key": LITEAPI_API_KEY},
-        timeout=15,
-    )
-    resp.raise_for_status()
-    data = resp.json()
+    try:
+        resp = requests.get(
+            SEARCH_URL,
+            params={"cityName": city, "countryCode": country_code},
+            headers={"X-API-Key": LITEAPI_API_KEY},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except requests.exceptions.RequestException as e:
+        # A transient network/timeout/upstream error, distinct from the "not configured" case
+        # above — logged with the real cause so it's diagnosable, but reported to the model in
+        # the same "don't invent data, tell the traveller honestly" shape it already expects.
+        print(f"  [ERROR] search_hotels request failed: {e}")
+        return {
+            "error": f"Hotel search request failed ({type(e).__name__}) — likely a transient "
+                     "network/upstream issue, not a missing configuration. Tell the traveller "
+                     "honestly that the live hotel search hit a temporary issue and ask them to "
+                     "try again in a moment — do not say it isn't wired up, and do not invent "
+                     "hotel names, prices, or availability."
+        }
     return {"city": city, "raw": data, "source": "liteapi.travel (live)"}
 
 
@@ -48,14 +61,18 @@ def get_hotel_details(hotel_id: str) -> dict:
     if not LITEAPI_API_KEY:
         return {"error": "LITEAPI_API_KEY is not configured — hotel detail lookup is not connected yet."}
 
-    resp = requests.get(
-        DETAIL_URL,
-        params={"hotelId": hotel_id},
-        headers={"X-API-Key": LITEAPI_API_KEY},
-        timeout=15,
-    )
-    resp.raise_for_status()
-    data = resp.json().get("data") or {}
+    try:
+        resp = requests.get(
+            DETAIL_URL,
+            params={"hotelId": hotel_id},
+            headers={"X-API-Key": LITEAPI_API_KEY},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json().get("data") or {}
+    except requests.exceptions.RequestException as e:
+        print(f"  [ERROR] get_hotel_details request failed: {e}")
+        return {"error": f"Hotel detail request failed ({type(e).__name__}) — a transient network/upstream issue."}
     if not data:
         return {"error": f"No hotel detail found for hotel_id {hotel_id!r}."}
     return {"data": data, "source": "liteapi.travel (live)"}
