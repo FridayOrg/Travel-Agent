@@ -7,6 +7,7 @@ grounded and correctly tied to that one property. A field that LiteAPI didn't ac
 is simply omitted (None) — never guessed or filled in.
 """
 import re
+from datetime import date
 
 _TAG_RE = re.compile(r"<[^>]+>")
 _WS_RE = re.compile(r"\s+")
@@ -20,7 +21,17 @@ def _strip_html(text):
     return text or None
 
 
-def build_hotel_card(detail: dict, rates: dict = None) -> dict:
+def _nights_between(checkin: str, checkout: str):
+    try:
+        d1 = date.fromisoformat(checkin)
+        d2 = date.fromisoformat(checkout)
+        n = (d2 - d1).days
+        return n if n > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def build_hotel_card(detail: dict, rates: dict = None, checkin: str = None, checkout: str = None) -> dict:
     d = (detail or {}).get("data") or {}
     if not d:
         return None
@@ -63,9 +74,17 @@ def build_hotel_card(detail: dict, rates: dict = None) -> dict:
         cancel = rate.get("cancellationPolicies") or {}
         cancel_infos = cancel.get("cancelPolicyInfos") or []
 
+        nights = _nights_between(checkin, checkout)
+        total_amount = total.get("amount")
+        per_night = round(total_amount / nights, 2) if (total_amount is not None and nights) else None
+
         card["price"] = {
-            "amount": total.get("amount"),
+            # "amount"/"currency" is the TOTAL price for the whole stay (LiteAPI's own "total"
+            # field), not a nightly rate — kept as the primary field for backward compatibility.
+            "amount": total_amount,
             "currency": total.get("currency"),
+            "nights": nights,
+            "price_per_night": per_night,
             "room_name": rate.get("name"),
             "board_name": rate.get("boardName"),
             "taxes_and_fees": [

@@ -325,7 +325,7 @@ def get_hotel_cards(session_id: str):
             rr = get_hotel_rates(hotel_id, ctx.checkin, ctx.checkout, ctx.adults or 2, "US", "USD")
             if "error" not in rr:
                 rates = rr
-        card = build_hotel_card(detail, rates)
+        card = build_hotel_card(detail, rates, checkin=ctx.checkin, checkout=ctx.checkout)
         if card:
             cards.append(card)
 

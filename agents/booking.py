@@ -6,6 +6,7 @@ from tools.booking import (
     complete_booking as _complete_booking,
 )
 from tools.weather import get_weather
+from agents.hotel_card import _nights_between
 
 SYSTEM_PROMPT = """{today}
 
@@ -35,9 +36,11 @@ Follow this exact sequence, one step at a time, confirming with the traveller as
    a different hotel themselves if none of the listed alternatives have rates either.
 2. Present the FIRST offer returned (it's the same rate already shown to the traveller on the hotel card
    they picked from — presenting anything else would show them a different price than the one they chose the
-   hotel for). Show the price and room/rate details clearly (room name, board/meal plan, total price in the
-   traveller's home currency). Only mention one of the other returned offers if the traveller explicitly asks
-   about a different room type or rate. Each offer has a short offer_id like
+   hotel for). State BOTH the total price for the whole stay ("total_price" for all "nights") AND the average
+   per-night rate ("price_per_night") clearly and separately — e.g. "$268.26 total for your 3 nights ($89.42/
+   night)" — never state total_price alone as if it were a nightly rate, and never state price_per_night alone
+   without also giving the real total the traveller will pay. Only mention one of the other returned offers if
+   the traveller explicitly asks about a different room type or rate. Each offer has a short offer_id like
    "R1" — use that short id exactly as given when you call prebook_rate, never invent your own id.
 3. Then ask this exact clickable question — never skip it, and never ask for guest details before it:
    {{"type": "clarifying_question", "stage": "hotel_confirm", "question": "Are you happy with this hotel?", "options": ["Yes, continue", "Choose another hotel"]}}
@@ -111,9 +114,12 @@ def make_agent(context):
         if not offer_id or not rates:
             return {"offers": [], "note": "No available offers for this hotel/these dates."}
 
+        nights = _nights_between(check_in, check_out)
+
         options = []
         for rate in rates[:3]:  # the first rate (matches the card) plus up to 2 nearby alternatives
             total = ((rate.get("retailRate") or {}).get("total") or [{}])[0]
+            amount = total.get("amount")
             short_id = f"R{len(context.offer_lookup) + 1}"
             context.offer_lookup[short_id] = offer_id
             options.append({
@@ -121,7 +127,9 @@ def make_agent(context):
                 "hotel_id": hotel_id,
                 "room_name": rate.get("name"),
                 "board": rate.get("boardName"),
-                "price": total.get("amount"),
+                "total_price": amount,  # for the ENTIRE stay — nights below, not per night
+                "price_per_night": round(amount / nights, 2) if (amount is not None and nights) else None,
+                "nights": nights,
                 "currency": total.get("currency"),
             })
 
@@ -130,7 +138,9 @@ def make_agent(context):
             "source": "liteapi.travel (live)",
             "note": "The first offer here is the same rate already shown to the traveller on the "
                     "hotel card — present that one as the price unless the traveller specifically "
-                    "asks about other room options.",
+                    "asks about other room options. 'total_price' is for the entire stay (all "
+                    "'nights'), 'price_per_night' is the average nightly rate — state both clearly, "
+                    "never present total_price as if it were a nightly rate.",
         }
 
     def prebook_rate(offer_id: str) -> dict:
