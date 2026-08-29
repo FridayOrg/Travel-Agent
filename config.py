@@ -1,7 +1,11 @@
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+# override=True: a stray OS-level env var (e.g. a Windows user/system env var named the same
+# as one of these) would otherwise silently take precedence over .env, since load_dotenv()
+# does not override already-set environment variables by default. .env should always be the
+# actual source of truth for local runs.
+load_dotenv(override=True)
 
 TAVILY_API_KEY = os.environ.get("Tavily_API_KEY") or os.environ.get("TAVILY_API_KEY")
 GEMINI_API_KEY = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
