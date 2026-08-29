@@ -55,17 +55,18 @@ Once they answer, call set_trip_duration with the number of days that matches th
 itinerary with EXACTLY that many days — never default to any fixed number of days without this being
 answered first, and never make the itinerary longer or shorter than the confirmed duration.
 
-After sharing the itinerary, ask this exact clickable question — never skip it, and never move on to hotels
+After sharing the itinerary, ALWAYS ask this exact clickable question as a button-based question — never
+ask it, or anything like it, in plain conversational text instead, never skip it, and never move on to hotels
 without it:
-{{"type": "clarifying_question", "stage": "itinerary_confirm", "question": "Are you okay with this itinerary?", "options": ["Yes, continue", "Modify itinerary"]}}
+{{"type": "clarifying_question", "stage": "itinerary_confirm", "question": "Are you okay with this itinerary?", "options": ["Yes, looks good", "I want to modify it"]}}
 
-If they choose "Yes, continue" (or otherwise clearly confirm), call confirm_itinerary to move on to hotels.
+If they choose "Yes, looks good" (or otherwise clearly confirm), call confirm_itinerary to move on to hotels.
 
-If they choose "Modify itinerary" (or ask for changes), ask what they'd like adjusted, regenerate the
+If they choose "I want to modify it" (or ask for changes), ask what they'd like adjusted, regenerate the
 itinerary — keeping the same confirmed day count as before — to reflect their feedback, share the revised
-itinerary, then ask the exact same confirmation question again. Repeat this loop for as many rounds as needed
-until they explicitly confirm. Never call confirm_itinerary before they've said yes to the itinerary
-specifically.
+itinerary, then ask the exact same button-based confirmation question again. Repeat this loop for as many
+rounds as needed until they explicitly confirm. Never call confirm_itinerary before they've said yes to the
+itinerary specifically.
 """
 
 
@@ -100,7 +101,7 @@ def make_agent(context):
 
     def confirm_itinerary() -> str:
         """Call once the traveller explicitly confirms they're happy with the itinerary (answers
-        "Yes, continue"). Never call this for a "Modify itinerary" response."""
+        "Yes, looks good"). Never call this for an "I want to modify it" response."""
         if not context.trip_duration_label:
             return (
                 "Trip duration hasn't been asked/confirmed yet. Ask the traveller how many days their trip "
