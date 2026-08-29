@@ -33,8 +33,11 @@ Follow this exact sequence, one step at a time, confirming with the traveller as
    one returns real offers, then tell the traveller plainly which hotel you ended up finding availability for
    and why ("X had no availability for those dates, so I checked Y instead"). Only ask the traveller to pick
    a different hotel themselves if none of the listed alternatives have rates either.
-2. Present the price and room/rate details clearly (room name, board/meal plan, total price in the
-   traveller's home currency) for whichever hotel actually has offers. Each offer has a short offer_id like
+2. Present the FIRST offer returned (it's the same rate already shown to the traveller on the hotel card
+   they picked from — presenting anything else would show them a different price than the one they chose the
+   hotel for). Show the price and room/rate details clearly (room name, board/meal plan, total price in the
+   traveller's home currency). Only mention one of the other returned offers if the traveller explicitly asks
+   about a different room type or rate. Each offer has a short offer_id like
    "R1" — use that short id exactly as given when you call prebook_rate, never invent your own id.
 3. Then ask this exact clickable question — never skip it, and never ask for guest details before it:
    {{"type": "clarifying_question", "stage": "hotel_confirm", "question": "Are you happy with this hotel?", "options": ["Yes, continue", "Choose another hotel"]}}
@@ -91,29 +94,44 @@ def make_agent(context):
         if "error" in result:
             return result
 
-        options = []
-        for hotel in (result.get("raw") or {}).get("data") or []:
-            for room in hotel.get("roomTypes") or []:
-                offer_id = room.get("offerId")
-                if not offer_id:
-                    continue
-                short_id = f"R{len(context.offer_lookup) + 1}"
-                context.offer_lookup[short_id] = offer_id
-                for rate in room.get("rates") or []:
-                    total = ((rate.get("retailRate") or {}).get("total") or [{}])[0]
-                    options.append({
-                        "offer_id": short_id,
-                        "hotel_id": hotel_id,
-                        "room_name": rate.get("name"),
-                        "board": rate.get("boardName"),
-                        "price": total.get("amount"),
-                        "currency": total.get("currency"),
-                    })
-                break  # one offer alias per room type is enough detail for the model
-
-        if not options:
+        # LiteAPI can return 100+ near-duplicate room/rate combinations for one hotel (different
+        # suppliers, board types, bed configs). The hotel-cards endpoint (agents/hotel_card.py)
+        # already committed to showing the traveller the very FIRST rate as "the" price for this
+        # hotel — so the price quoted here at booking time must be that exact same rate, or the
+        # traveller sees a different (often higher) number than what they picked the hotel for.
+        # Only offer that first rate, plus a couple of cheaper true alternatives if any exist, to
+        # keep this consistent while still giving the model a small, sane set to work with.
+        rate_list = (result.get("raw") or {}).get("data") or []
+        if not rate_list:
             return {"offers": [], "note": "No available offers for this hotel/these dates."}
-        return {"offers": options, "source": "liteapi.travel (live)"}
+
+        room = (rate_list[0].get("roomTypes") or [{}])[0]
+        offer_id = room.get("offerId")
+        rates = room.get("rates") or []
+        if not offer_id or not rates:
+            return {"offers": [], "note": "No available offers for this hotel/these dates."}
+
+        options = []
+        for rate in rates[:3]:  # the first rate (matches the card) plus up to 2 nearby alternatives
+            total = ((rate.get("retailRate") or {}).get("total") or [{}])[0]
+            short_id = f"R{len(context.offer_lookup) + 1}"
+            context.offer_lookup[short_id] = offer_id
+            options.append({
+                "offer_id": short_id,
+                "hotel_id": hotel_id,
+                "room_name": rate.get("name"),
+                "board": rate.get("boardName"),
+                "price": total.get("amount"),
+                "currency": total.get("currency"),
+            })
+
+        return {
+            "offers": options,
+            "source": "liteapi.travel (live)",
+            "note": "The first offer here is the same rate already shown to the traveller on the "
+                    "hotel card — present that one as the price unless the traveller specifically "
+                    "asks about other room options.",
+        }
 
     def prebook_rate(offer_id: str) -> dict:
         """Lock in a rate offer and get the final confirmed price before booking. Returns a short
