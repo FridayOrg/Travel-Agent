@@ -111,6 +111,16 @@ def make_agent(context):
         room = (rate_list[0].get("roomTypes") or [{}])[0]
         offer_id = room.get("offerId")
         rates = room.get("rates") or []
+
+        # A rate check can succeed for a DIFFERENT hotel than the one originally selected (the
+        # system prompt has the model try alternates when the first choice has no availability).
+        # Update the actual selected hotel here, deterministically, the moment a real rate check
+        # succeeds — not left to the model remembering to say so — so /hotel-cards, /images, and
+        # the final booking all agree on which hotel is actually being booked, not a stale one.
+        if offer_id and rates:
+            context.selected_hotel_id = hotel_id
+            context.selected_hotel_name = (context.known_hotels or {}).get(hotel_id) or context.selected_hotel_name
+
         if not offer_id or not rates:
             return {"offers": [], "note": "No available offers for this hotel/these dates."}
 
