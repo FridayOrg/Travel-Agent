@@ -4,7 +4,7 @@ from datetime import date
 
 from google import genai
 from google.genai import errors
-from config import GEMINI_API_KEY, BOOKING_GEMINI_API_KEY, STT_GEMINI_API_KEY
+from config import GEMINI_API_KEY, BOOKING_GEMINI_API_KEY, STT_GEMINI_API_KEY, ANSWER_MATCHER_GEMINI_API_KEY
 
 MODEL = "gemini-flash-lite-latest"
 
@@ -58,6 +58,7 @@ def response_formatting_instructions() -> str:
 _client = None
 _booking_client = None
 _stt_client = None
+_answer_matcher_client = None
 
 
 def get_client():
@@ -90,6 +91,19 @@ def get_stt_client():
             raise RuntimeError("STT_GEMINI_API_KEY (or GEMINI_API_KEY) is missing from .env")
         _stt_client = genai.Client(api_key=STT_GEMINI_API_KEY)
     return _stt_client
+
+
+def get_answer_matcher_client():
+    """Separate Gemini client/API key for the answer-matcher (agents/answer_matcher.py) — the
+    highest-frequency Gemini call in the app, since it runs on every button click, typed
+    answer, or voice answer during INTAKE and HOTEL_DETAILS. Isolating its quota keeps a busy
+    intake/hotel-details screen from starving (or being starved by) the other agents."""
+    global _answer_matcher_client
+    if _answer_matcher_client is None:
+        if not ANSWER_MATCHER_GEMINI_API_KEY:
+            raise RuntimeError("ANSWER_MATCHER_GEMINI_API_KEY (or GEMINI_API_KEY) is missing from .env")
+        _answer_matcher_client = genai.Client(api_key=ANSWER_MATCHER_GEMINI_API_KEY)
+    return _answer_matcher_client
 
 
 def _call_with_retry(fn, max_retries: int = 8):

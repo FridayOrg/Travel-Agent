@@ -12,7 +12,7 @@ import re
 
 from google.genai import types
 
-from llm import get_client, MODEL, today_context, generate_with_retry, send_with_retry
+from llm import get_answer_matcher_client, MODEL, today_context, generate_with_retry, send_with_retry
 from static_stages import INTAKE_QUESTIONS, HOTEL_TRAVELLERS_QUESTION, HOTEL_BUDGET_QUESTION
 from tools.search import web_search
 
@@ -20,7 +20,7 @@ _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def _ask_matcher(instructions: str) -> dict:
-    client = get_client()
+    client = get_answer_matcher_client()
     resp = generate_with_retry(client, model=MODEL, contents=instructions)
     raw = (resp.text or "").strip()
     start, end = raw.find("{"), raw.rfind("}")
@@ -58,7 +58,7 @@ Classify what they mean, choosing exactly one:
   regenerating/modifying the itinerary.
 
 Respond with ONLY one word: answer, question, or change_request"""
-    client = get_client()
+    client = get_answer_matcher_client()
     resp = generate_with_retry(client, model=MODEL, contents=prompt)
     label = (resp.text or "").strip().lower()
     if "change" in label:
@@ -182,7 +182,7 @@ def answer_side_question(text: str, pending_question: str, context) -> str:
                 known_bits.append(f"{k}: {v}")
     known = "\n".join(known_bits) or "Nothing collected yet."
 
-    client = get_client()
+    client = get_answer_matcher_client()
     prompt = f"""{today_context()}
 
 You are a travel consultant chatbot. The traveller is currently being asked this question by

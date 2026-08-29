@@ -9,9 +9,10 @@ Run with: uvicorn api:app --port 8000 --reload
 import io
 import uuid
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
+from google.genai import errors as genai_errors
 from pydantic import BaseModel
 
 from orchestrator import Orchestrator
@@ -28,6 +29,30 @@ app.add_middleware(
 )
 
 SESSIONS: dict[str, Orchestrator] = {}
+
+
+@app.exception_handler(genai_errors.ClientError)
+async def gemini_rate_limit_handler(request: Request, exc: genai_errors.ClientError):
+    """Every Gemini call site already retries through transient 429s (see llm.py's
+    send_with_retry / generate_with_retry) — this only fires once retries are fully exhausted
+    (the free-tier quota is still exhausted after several minutes of backoff). Return a normal
+    200 with a friendly, actionable reply instead of a raw 500 the frontend can't render
+    meaningfully — the traveller just needs to know to wait a moment and try again, not see a
+    broken error page."""
+    if getattr(exc, "code", None) == 429:
+        return JSONResponse(
+            status_code=200,
+            content={
+                "reply": (
+                    "I'm getting a lot of requests right now and couldn't finish that in time. "
+                    "Please wait a few seconds and try again."
+                ),
+                "resolved": {},
+                "missing": [],
+                "error": "rate_limited",
+            },
+        )
+    return JSONResponse(status_code=502, content={"detail": "Upstream AI service error."})
 
 
 def get_orchestrator(session_id: str) -> Orchestrator:
