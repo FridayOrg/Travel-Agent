@@ -54,6 +54,13 @@ you only mentioned in passing. If the traveller's answer is ambiguous between tw
 (e.g. multiple "Rove"-branded properties), double-check against your own most recent recommend_hotels call
 before choosing an id — do not guess between similarly-named properties.
 
+If the traveller answers with just a number or ordinal ("1", "2", "the first one", "second option", "#3"),
+this refers to that hotel's POSITION in the numbered list you just presented in your own reply text — "1"/
+"first" means the FIRST hotel you listed, "2"/"second" means the SECOND, and so on. Match it against the
+exact order you listed them in your reply (the same order you passed to recommend_hotels), never against
+any other ordering. Double-check you have the position right before calling select_hotel — getting this
+wrong means booking a hotel the traveller didn't actually choose.
+
 Keep replies SHORT and conversational.
 """
 

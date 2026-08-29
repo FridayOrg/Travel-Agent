@@ -6,6 +6,32 @@ from llm import send_with_retry
 
 _BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
 
+_ORDINAL_WORDS = {
+    "first": 1, "1st": 1, "one": 1,
+    "second": 2, "2nd": 2, "two": 2,
+    "third": 3, "3rd": 3, "three": 3,
+    "fourth": 4, "4th": 4, "four": 4,
+}
+
+
+def _parse_bare_ordinal(text: str, count: int):
+    """If the message is JUST a position reference (e.g. "1", "2", "the first one", "option 3",
+    "#2") and nothing else, return that 1-based position (if within 1..count) — else None. Kept
+    deliberately narrow: anything with extra words describing the hotel itself (a name, a
+    preference) falls through to the LLM's own judgement instead of being force-matched here."""
+    cleaned = re.sub(r"[.!?]+$", "", (text or "").strip().lower())
+    cleaned = re.sub(r"^(the|option|number|no\.?|#)\s+", "", cleaned)
+    cleaned = re.sub(r"\s+(one|option)$", "", cleaned)
+    cleaned = cleaned.strip(" #")
+
+    if cleaned.isdigit():
+        n = int(cleaned)
+        return n if 1 <= n <= count else None
+    if cleaned in _ORDINAL_WORDS:
+        n = _ORDINAL_WORDS[cleaned]
+        return n if 1 <= n <= count else None
+    return None
+
 
 def extract_places(text: str, limit: int = 3) -> list:
     """Pulls the **bolded** place/attraction names an agent's reply already names — these are
@@ -73,6 +99,31 @@ class Orchestrator:
         return text
 
     def send(self, user_message: str) -> str:
+        # Deterministic shortcut: during HOTEL_SEARCH, a bare position reference ("1", "the
+        # second one", "#3") always means that hotel's position in the list just presented
+        # (current_hotel_ids, in the exact order recommend_hotels was called with) — resolve it
+        # in code rather than trusting the LLM to map the number back to the right id, since
+        # that mapping has been observed to go wrong (picking a different hotel than the
+        # traveller's stated position, only "recovering" by coincidence via the no-availability
+        # fallback). Anything not a clean bare position falls through to the LLM as normal.
+        if self.context.stage == "HOTEL_SEARCH" and self.context.current_hotel_ids:
+            ids = self.context.current_hotel_ids
+            pos = _parse_bare_ordinal(user_message, len(ids))
+            if pos:
+                hotel_id = ids[pos - 1]
+                hotel_name = (self.context.known_hotels or {}).get(hotel_id)
+                if hotel_name:
+                    self.context.selected_hotel_id = hotel_id
+                    self.context.selected_hotel_name = hotel_name
+                    return self.enter_llm_stage(
+                        "BOOKING",
+                        opener_override=(
+                            f"The traveller selected hotel #{pos}, \"{hotel_name}\", from the list you "
+                            "just presented. Greet them briefly confirming this hotel, then get the real "
+                            "rates for it (call get_hotel_rates with its id)."
+                        ),
+                    )
+
         stage_before = self.context.stage
         response = send_with_retry(self._chat, user_message)
         text = response.text or ""
