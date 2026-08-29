@@ -48,7 +48,11 @@ show the right photos and details for exactly what you're recommending — not a
 happens to mention in passing.
 
 Once the traveller clearly picks one of the hotels you presented, call select_hotel with its exact id and
-name to move on to booking. Do not call it before they've actually chosen one.
+name to move on to booking. Do not call it before they've actually chosen one. Only ever select_hotel for one
+of the hotels you most recently called recommend_hotels with — never a hotel from an earlier search or one
+you only mentioned in passing. If the traveller's answer is ambiguous between two similarly-named hotels
+(e.g. multiple "Rove"-branded properties), double-check against your own most recent recommend_hotels call
+before choosing an id — do not guess between similarly-named properties.
 
 Keep replies SHORT and conversational.
 """
@@ -109,23 +113,39 @@ def make_agent(context):
           hotel_name: the chosen hotel's name
         """
         known = getattr(context, "known_hotels", {}) or {}
+        # Only the 2-3 hotels actually recommended THIS turn are valid choices — known_hotels can
+        # hold 100+ entries accumulated across every search_hotels call this session (including
+        # similarly-named properties, e.g. multiple "Rove"-branded hotels), so validating against
+        # the full pool let a wrong-but-known id slip through when the model mismatched a hotel
+        # name to a different hotel's id. Restricting to current_hotel_ids catches that instead of
+        # silently booking the wrong property.
+        recommended = getattr(context, "current_hotel_ids", None) or []
+        candidates = {hid: known.get(hid) for hid in recommended} or known
 
-        if hotel_id not in known:
+        if hotel_id not in candidates:
             match = next(
-                (kid for kid, kname in known.items() if kname and kname.lower() == hotel_name.lower()),
+                (hid for hid in candidates if candidates.get(hid) and candidates[hid].lower() == hotel_name.lower()),
                 None,
             )
             if match:
-                print(f"  [WARN] select_hotel got unknown id {hotel_id!r} for {hotel_name!r}; "
-                      f"corrected to real id {match!r} from last search_hotels results.")
+                print(f"  [WARN] select_hotel got id {hotel_id!r} for {hotel_name!r} not in the "
+                      f"recommended set; corrected to real id {match!r}.")
                 hotel_id = match
             else:
-                print(f"  [WARN] select_hotel got unknown id {hotel_id!r} / name {hotel_name!r}, "
-                      f"no match in last search_hotels results — rejecting.")
+                print(f"  [WARN] select_hotel got id {hotel_id!r} / name {hotel_name!r}, not among "
+                      f"the hotels actually recommended this turn ({candidates}) — rejecting.")
                 return (
-                    "That hotel id/name doesn't match anything from the last search_hotels results. "
-                    "Re-run search_hotels or re-check the exact id before selecting."
+                    f"That id/name isn't one of the hotels you just recommended (current picks: "
+                    f"{candidates}). Re-check which exact hotel the traveller means and use its "
+                    f"exact id from that set — do not select_hotel for a hotel from a different, "
+                    f"earlier search result."
                 )
+        elif candidates.get(hotel_id) and candidates[hotel_id].lower() != hotel_name.lower():
+            # id is a valid recommended hotel, but the name passed doesn't match — use the real
+            # name for that id rather than trusting a possibly-mismatched name argument.
+            print(f"  [WARN] select_hotel name {hotel_name!r} doesn't match known name "
+                  f"{candidates[hotel_id]!r} for id {hotel_id!r}; using the known name.")
+            hotel_name = candidates[hotel_id]
 
         context.selected_hotel_id = hotel_id
         context.selected_hotel_name = hotel_name
