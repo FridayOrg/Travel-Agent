@@ -218,10 +218,17 @@ def make_agent(context):
         context.stage = "HOTEL_SEARCH"
         return "Returning to hotel recommendations."
 
+    # Restrict fallback alternates to the hotels actually RECOMMENDED to the traveller this turn
+    # (current_hotel_ids), not the entire known_hotels pool — that pool accumulates every hotel
+    # ever seen across every search_hotels call this session (100+ entries), so falling back to
+    # "any of known_hotels" could silently substitute a hotel the traveller never saw or chose,
+    # with a wildly different price, instead of one of the actual alternatives shown on screen.
+    known = context.known_hotels or {}
+    recommended = getattr(context, "current_hotel_ids", None) or list(known.keys())
     other_hotels = {
-        hid: name
-        for hid, name in (context.known_hotels or {}).items()
-        if hid != context.selected_hotel_id
+        hid: known.get(hid)
+        for hid in recommended
+        if hid != context.selected_hotel_id and known.get(hid)
     }
 
     client = get_booking_client()
